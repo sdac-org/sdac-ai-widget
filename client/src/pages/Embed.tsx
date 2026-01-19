@@ -115,21 +115,6 @@ export default function EmbedPage() {
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Configuration</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-slate-900 block mb-1">Widget Position</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button className="px-3 py-2 text-xs font-medium border border-blue-600 bg-blue-50 text-blue-700 rounded-md">Bottom Right</button>
-                    <button className="px-3 py-2 text-xs font-medium border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 rounded-md">Bottom Left</button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
                 <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Preview</CardTitle>
               </CardHeader>
               <CardContent>
