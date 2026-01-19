@@ -109,16 +109,6 @@ export default function EmbedPage() {
                 </pre>
               </CardContent>
             </Card>
-
-            <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex gap-3">
-              <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-semibold text-blue-900 text-sm">Embed Note</h4>
-                <p className="text-sm text-blue-700 mt-1">
-                  This iframe will load the assistant widget directly from the current domain. Ensure the parent page allows framing if you encounter issues.
-                </p>
-              </div>
-            </div>
           </div>
 
           {/* Sidebar Info */}
@@ -128,14 +118,6 @@ export default function EmbedPage() {
                 <CardTitle className="text-sm font-semibold uppercase tracking-wider text-slate-500">Configuration</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-slate-900 block mb-1">Target Environment</label>
-                  <select className="w-full text-sm border-slate-200 rounded-md bg-slate-50 py-2 px-3">
-                    <option>Production (v1.0.4)</option>
-                    <option>Staging (v1.1.0-beta)</option>
-                    <option>Development</option>
-                  </select>
-                </div>
                 <div>
                   <label className="text-sm font-medium text-slate-900 block mb-1">Widget Position</label>
                   <div className="grid grid-cols-2 gap-2">
