@@ -3,7 +3,7 @@
   if (document.getElementById(SCRIPT_ID)) return;
 
   // Configuration
-  const WIDGET_URL = new URL(document.currentScript.src).origin + '/widget';
+  const WIDGET_URL = new URL(document.currentScript.src).origin + '/#/widget';
   
   // Create Launcher Button
   const launcher = document.createElement('div');

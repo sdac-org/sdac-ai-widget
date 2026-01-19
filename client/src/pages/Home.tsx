@@ -12,7 +12,17 @@ export default function Home() {
           Get Embed Code
         </button>
       </Link>
-      <AssistantWidget />
+      <div className="text-center space-y-4">
+          <h1 className="text-2xl font-bold text-slate-800">SDAC Assistant</h1>
+          <p className="text-slate-500">Click the button top-right to get the embed code.</p>
+          <div className="inline-flex gap-2">
+            <Link href="/widget">
+                <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md text-sm hover:bg-blue-100 transition-colors">
+                    View Widget Standalone
+                </button>
+            </Link>
+          </div>
+      </div>
     </div>
   );
 }
