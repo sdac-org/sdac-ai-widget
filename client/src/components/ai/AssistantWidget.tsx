@@ -230,15 +230,17 @@ export function AssistantWidget() {
       {/* Header */}
       <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3">
-            {view === "chat" && activeThreadId && activeThreadId !== "overview" ? (
+            {view === "chat" && (
                 <button onClick={handleBackToList} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
                     <ArrowLeft className="w-5 h-5 text-slate-300" />
                 </button>
-            ) : view === "thread_list" ? (
+            )}
+            {view === "thread_list" && (
                  <button onClick={() => setView("welcome")} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
                     <ArrowLeft className="w-5 h-5 text-slate-300" />
                 </button>
-            ) : (
+            )}
+            {view === "welcome" && (
                 <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
                     <Bot className="w-5 h-5 text-white" />
                 </div>
@@ -430,13 +432,6 @@ export function AssistantWidget() {
                 
                 {/* Input Area */}
                 <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-                    {/* Only show suggestions in Overview or new General threads */}
-                    {activeThread.type !== 'issue' && activeThread.messages.length < 3 && !isTyping && (
-                        <div className="flex gap-2 mb-3 overflow-x-auto pb-1 hide-scrollbar">
-                        <SuggestionPill onClick={() => handleSendMessage("Compare to last quarter")} label="Compare quarters" icon={History} />
-                        <SuggestionPill onClick={() => handleSendMessage("Why is fringe high?")} label="Fringe analysis" icon={TrendingUp} />
-                        </div>
-                    )}
                     <div className="relative">
                         <input
                         type="text"
