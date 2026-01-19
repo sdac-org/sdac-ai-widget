@@ -362,7 +362,7 @@ export function AssistantWidget() {
                     </div>
 
                     <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
-                        <div className="max-h-[160px] overflow-y-auto hide-scrollbar">
+                        <div className="overflow-visible">
                            <SuggestionList title="Suggested Actions">
                                 <SuggestionRow 
                                     onClick={startAnalysis} 
