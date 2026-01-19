@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { AssistantWidget } from "@/components/ai/AssistantWidget";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function Widget() {
   useEffect(() => {
@@ -14,7 +15,9 @@ export default function Widget() {
 
   return (
     <div className="h-screen w-screen bg-transparent flex items-end justify-end">
-      <AssistantWidget />
+      <ErrorBoundary>
+        <AssistantWidget />
+      </ErrorBoundary>
     </div>
   );
 }

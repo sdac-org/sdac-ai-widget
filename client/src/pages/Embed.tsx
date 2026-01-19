@@ -21,9 +21,9 @@ export default function EmbedPage() {
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-4">
           <Link href="/">
-            <a className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+            <button className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
               <ChevronLeft className="w-5 h-5" />
-            </a>
+            </button>
           </Link>
           <div>
             <h1 className="text-lg font-bold text-slate-900">Integration & Deployment</h1>
