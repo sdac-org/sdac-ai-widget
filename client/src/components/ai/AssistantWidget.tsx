@@ -14,7 +14,8 @@ import {
   MessageSquare,
   Plus,
   Search,
-  Copy
+  Copy,
+  Check
 } from "lucide-react";
 import { MOCK_ISSUES, QA_PAIRS, REPORT_DATA } from "@/lib/mock-data";
 
@@ -24,7 +25,7 @@ type Message = {
   id: string;
   role: "user" | "ai";
   content: string;
-  type?: "text" | "comparison" | "summary_component" | "issue_init";
+  type?: "text" | "comparison" | "summary_component" | "issue_init" | "feedback_draft";
   issueData?: typeof MOCK_ISSUES[0];
 };
 
@@ -191,7 +192,8 @@ export function AssistantWidget() {
          responseMsg = {
           id: Date.now().toString() + "_ai",
           role: "ai",
-          content: `I've drafted a sendback based on the 3 issues found:\n\n"Please review the following items in your Q3-2025 submission:\n\n1. Position #7 (Goldberg) is listed with Source Code 4 (Federal) but has claimed costs. Federal costs are not eligible for SDAC reimbursement.\n2. Position #12 has $0 salary without an explanatory comment.\n3. The justification mentions general increases but does not account for the new positions (Williams, Lee) which contribute to the 12.3% variance.\n\nPlease correct these items and resubmit."`
+          content: `I've drafted a sendback based on the 3 issues found:\n\n"Please review the following items in your Q3-2025 submission:\n\n1. Position #7 (Goldberg) is listed with Source Code 4 (Federal) but has claimed costs. Federal costs are not eligible for SDAC reimbursement.\n2. Position #12 has $0 salary without an explanatory comment.\n3. The justification mentions general increases but does not account for the new positions (Williams, Lee) which contribute to the 12.3% variance.\n\nPlease correct these items and resubmit."`,
+          type: "feedback_draft"
         };
       }
       // Check for specific issue feedback generation
@@ -218,7 +220,8 @@ export function AssistantWidget() {
          responseMsg = {
              id: Date.now().toString() + "_ai",
              role: "ai",
-             content: `Here is a draft feedback message for this issue:\n\n${feedbackContent}`
+             content: `Here is a draft feedback message for this issue:\n\n${feedbackContent}`,
+             type: "feedback_draft"
          };
       }
       // Standard Q&A matching
@@ -431,7 +434,7 @@ export function AssistantWidget() {
                             {msg.type === 'summary_component' ? (
                                 <SummaryComponent onCreateIssueThread={createIssueThread} onStartChat={() => createGeneralThread()} />
                             ) : (
-                                <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                                <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm group/msg relative ${
                                     msg.role === 'user' 
                                     ? 'bg-blue-600 text-white rounded-br-none' 
                                     : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none'
@@ -441,6 +444,11 @@ export function AssistantWidget() {
                                     ) : (
                                         <>
                                             <FormattedMessage content={msg.content} />
+                                            {msg.type === 'feedback_draft' && (
+                                                <div className="absolute top-2 right-2 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                                                    <CopyButton text={extractFeedbackText(msg.content)} />
+                                                </div>
+                                            )}
                                             {msg.type === 'issue_init' && (
                                                 <div className="mt-3 pt-3 border-t border-slate-100">
                                                     <button 
@@ -500,6 +508,31 @@ export function AssistantWidget() {
       </div>
     </div>
   );
+}
+
+function extractFeedbackText(content: string) {
+    const match = content.match(/"([^"]+)"/);
+    return match ? match[1] : content;
+}
+
+function CopyButton({ text }: { text: string }) {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <button 
+            onClick={handleCopy}
+            className="p-1.5 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
+            title="Copy feedback"
+        >
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
+        </button>
+    );
 }
 
 // Format text with bold support
