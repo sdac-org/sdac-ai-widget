@@ -592,13 +592,6 @@ function SummaryComponent({ onCreateIssueThread, onStartChat }: { onCreateIssueT
             </div>
 
             <div className="mt-2 flex gap-2">
-                <button 
-                    onClick={() => onStartChat("Draft a sendback for these issues")}
-                    className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 shadow-md shadow-blue-900/10 transition-all flex items-center justify-center gap-2"
-                >
-                    <Sparkles className="w-4 h-4" />
-                    Draft Sendback
-                </button>
             </div>
         </div>
     );
