@@ -287,10 +287,27 @@ export function AssistantWidget() {
                     </div>
 
                     <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-                        <div className="flex gap-2 mb-3 overflow-x-auto pb-1 hide-scrollbar">
-                            <SuggestionPill onClick={startAnalysis} label="Evaluate potential issues" icon={Search} />
-                            <SuggestionPill onClick={() => handleSendMessage("Compare to last quarter")} label="Compare quarters" icon={History} />
-                            <SuggestionPill onClick={() => handleSendMessage("Why is fringe high?")} label="Fringe analysis" icon={TrendingUp} />
+                        <div className="max-h-[300px] overflow-y-auto mb-2 hide-scrollbar">
+                            <SuggestionList title="Suggested Actions">
+                                <SuggestionRow 
+                                    onClick={startAnalysis} 
+                                    label="Evaluate Potential Issues" 
+                                    icon={Search}
+                                    description="Run automated validation checks"
+                                />
+                                <SuggestionRow 
+                                    onClick={() => handleSendMessage("Compare to last quarter")} 
+                                    label="Compare Quarters" 
+                                    icon={History}
+                                    description="Review trends against Q2-2025"
+                                />
+                                <SuggestionRow 
+                                    onClick={() => handleSendMessage("Why is fringe high?")} 
+                                    label="Analyze Fringe Benefits" 
+                                    icon={TrendingUp}
+                                    description="Investigate the 8.7% increase"
+                                />
+                            </SuggestionList>
                         </div>
                         <div className="relative">
                             <input
@@ -513,6 +530,38 @@ function SummaryComponent({ onCreateIssueThread, onStartChat }: { onCreateIssueT
             </div>
         </div>
     );
+}
+
+function SuggestionList({ title, children }: { title: string, children: React.ReactNode }) {
+  return (
+    <div className="mb-4 px-1">
+      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+        <Sparkles className="w-3 h-3 text-blue-400" />
+        {title}
+      </p>
+      <div className="flex flex-col gap-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SuggestionRow({ onClick, label, icon: Icon, description }: { onClick: () => void, label: string, icon: any, description?: string }) {
+  return (
+    <button 
+      onClick={onClick}
+      className="w-full flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl text-left hover:border-blue-300 hover:shadow-md hover:bg-blue-50/30 transition-all group"
+    >
+      <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 group-hover:bg-blue-100 group-hover:border-blue-200 group-hover:text-blue-600 transition-colors">
+        <Icon className="w-4 h-4 text-slate-500 group-hover:text-blue-600" />
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-slate-700 group-hover:text-blue-800">{label}</div>
+        {description && <div className="text-xs text-slate-400 group-hover:text-blue-600/70">{description}</div>}
+      </div>
+      <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-400" />
+    </button>
+  );
 }
 
 function SuggestionPill({ onClick, label, icon: Icon }: { onClick: () => void, label: string, icon: any }) {
