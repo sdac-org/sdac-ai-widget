@@ -270,8 +270,12 @@ export function AssistantWidget() {
     }, 1500);
   };
 
+  const handleClose = () => {
+    window.parent.postMessage({ type: 'close-widget' }, '*');
+  };
+
   return (
-    <div className="w-[380px] h-[640px] bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col overflow-hidden">
       {/* Header */}
       <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3">
@@ -297,15 +301,24 @@ export function AssistantWidget() {
           </div>
         </div>
 
-        {view !== "analyzing" && view !== "main" && (
-             <button 
-                onClick={() => createGeneralThread()} 
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
-                title="New Chat"
-             >
-                 <Plus className="w-4 h-4" />
-             </button>
-        )}
+        <div className="flex items-center gap-1">
+            {view !== "analyzing" && view !== "main" && (
+                <button 
+                    onClick={() => createGeneralThread()} 
+                    className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
+                    title="New Chat"
+                >
+                    <Plus className="w-4 h-4" />
+                </button>
+            )}
+            <button 
+                onClick={handleClose}
+                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors ml-1"
+                title="Close Widget"
+            >
+                <X className="w-4 h-4" />
+            </button>
+        </div>
       </div>
 
       {/* Content Area */}
