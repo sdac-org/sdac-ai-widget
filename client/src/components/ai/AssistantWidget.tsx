@@ -389,7 +389,7 @@ export function AssistantWidget() {
                                     {msg.type === 'comparison' ? (
                                         <ComparisonCard />
                                     ) : (
-                                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                                        <FormattedMessage content={msg.content} />
                                     )}
                                 </div>
                             )}
@@ -444,6 +444,23 @@ export function AssistantWidget() {
       </div>
     </div>
   );
+}
+
+// Format text with bold support
+function FormattedMessage({ content }: { content: string }) {
+    // Split by **text**
+    const parts = content.split(/(\*\*[^*]+\*\*)/g);
+    
+    return (
+        <p className="whitespace-pre-wrap">
+            {parts.map((part, index) => {
+                if (part.startsWith('**') && part.endsWith('**')) {
+                    return <strong key={index} className="font-bold text-slate-900">{part.slice(2, -2)}</strong>;
+                }
+                return <span key={index}>{part}</span>;
+            })}
+        </p>
+    );
 }
 
 // Extracted Summary Component for the Overview Thread
