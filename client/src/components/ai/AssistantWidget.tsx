@@ -39,7 +39,7 @@ type Thread = {
   issueId?: number; // Link to specific issue if applicable
 };
 
-export function AssistantWidget() {
+export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const [view, setView] = useState<ViewState>("main");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
@@ -271,7 +271,11 @@ export function AssistantWidget() {
   };
 
   const handleClose = () => {
+    if (onClose) onClose();
     window.parent.postMessage({ type: 'close-widget' }, '*');
+    // Also post to window (self) in case we are in standalone mode and not using onClose prop
+    // (Though onClose prop is preferred for standalone parent-child communication)
+    window.postMessage({ type: 'close-widget' }, '*'); 
   };
 
   return (

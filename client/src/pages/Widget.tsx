@@ -39,7 +39,7 @@ export default function Widget() {
               transition={{ duration: 0.2 }}
               className="w-[400px] h-[700px] max-w-full max-h-full shadow-2xl rounded-2xl overflow-hidden"
             >
-              <AssistantWidget />
+              <AssistantWidget onClose={() => setIsOpen(false)} />
             </motion.div>
           ) : (
             <motion.button
