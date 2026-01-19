@@ -455,25 +455,39 @@ export function AssistantWidget() {
                                     ) : msg.type === 'fringe_analysis' ? (
                                         <FringeAnalysisCard />
                                     ) : (
-                                        <>
-                                            <FormattedMessage content={msg.content} />
-                                            {msg.type === 'feedback_draft' && (
-                                                <div className="absolute top-2 right-2 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                                                    <CopyButton text={extractFeedbackText(msg.content)} />
-                                                </div>
+                                            {msg.type === 'feedback_draft' ? (
+                                                (() => {
+                                                    const feedback = extractFeedbackText(msg.content);
+                                                    const intro = msg.content.replace(`"${feedback}"`, '').trim();
+                                                    
+                                                    return (
+                                                        <div className="flex flex-col gap-2">
+                                                            {intro && <FormattedMessage content={intro} />}
+                                                            <div className="relative bg-blue-50/50 border border-blue-100 rounded-lg p-3 pr-8">
+                                                                <p className="whitespace-pre-wrap font-medium text-slate-700 text-xs italic">"{feedback}"</p>
+                                                                <div className="absolute top-2 right-2">
+                                                                    <CopyButton text={feedback} />
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()
+                                            ) : (
+                                                <>
+                                                    <FormattedMessage content={msg.content} />
+                                                    {msg.type === 'issue_init' && (
+                                                        <div className="mt-3 pt-3 border-t border-slate-100">
+                                                            <button 
+                                                                onClick={() => handleSendMessage("Generate feedback draft")}
+                                                                className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center gap-2 border border-blue-200"
+                                                            >
+                                                                <Sparkles className="w-3.5 h-3.5" />
+                                                                Generate Feedback
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </>
                                             )}
-                                            {msg.type === 'issue_init' && (
-                                                <div className="mt-3 pt-3 border-t border-slate-100">
-                                                    <button 
-                                                        onClick={() => handleSendMessage("Generate feedback draft")}
-                                                        className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center gap-2 border border-blue-200"
-                                                    >
-                                                        <Sparkles className="w-3.5 h-3.5" />
-                                                        Generate Feedback
-                                                    </button>
-                                                </div>
-                                            )}
-                                        </>
                                     )}
                                 </div>
                             )}
