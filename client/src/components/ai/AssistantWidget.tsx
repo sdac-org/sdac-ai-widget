@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { MOCK_ISSUES, QA_PAIRS, REPORT_DATA } from "@/lib/mock-data";
 
-type ViewState = "welcome" | "analyzing" | "thread_list" | "chat";
+type ViewState = "main" | "analyzing" | "chat";
 
 type Message = {
   id: string;
@@ -39,7 +39,7 @@ type Thread = {
 };
 
 export function AssistantWidget() {
-  const [view, setView] = useState<ViewState>("welcome");
+  const [view, setView] = useState<ViewState>("main");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
@@ -81,8 +81,8 @@ export function AssistantWidget() {
     }, 2000);
   };
 
-  const handleBackToList = () => {
-      setView("thread_list");
+  const handleBackToMain = () => {
+      setView("main");
       setActiveThreadId(null);
   };
 
@@ -146,8 +146,8 @@ export function AssistantWidget() {
     
     const targetThreadId = threadIdOverride || activeThreadId;
 
-    // If in welcome state and no specific thread targeted, start a general thread
-    if (!targetThreadId && view === "welcome") {
+    // If in main state and no specific thread targeted, start a general thread
+    if (!targetThreadId && view === "main") {
         createGeneralThread(text);
         return;
     }
@@ -275,16 +275,11 @@ export function AssistantWidget() {
       <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3">
             {view === "chat" && (
-                <button onClick={handleBackToList} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
+                <button onClick={handleBackToMain} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
                     <ArrowLeft className="w-5 h-5 text-slate-300" />
                 </button>
             )}
-            {view === "thread_list" && (
-                 <button onClick={() => setView("welcome")} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
-                    <ArrowLeft className="w-5 h-5 text-slate-300" />
-                </button>
-            )}
-            {view === "welcome" && (
+            {view === "main" && (
                 <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
                     <Bot className="w-5 h-5 text-white" />
                 </div>
@@ -301,7 +296,7 @@ export function AssistantWidget() {
           </div>
         </div>
 
-        {view !== "analyzing" && view !== "welcome" && (
+        {view !== "analyzing" && view !== "main" && (
              <button 
                 onClick={() => createGeneralThread()} 
                 className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
@@ -315,25 +310,23 @@ export function AssistantWidget() {
       {/* Content Area */}
       <div className="flex-1 bg-slate-50 relative flex flex-col overflow-hidden">
         <AnimatePresence mode="wait">
-            {view === "welcome" && (
+            {view === "main" && (
                 <motion.div
-                    key="welcome"
+                    key="main"
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     className="flex flex-col flex-1 h-full"
                 >
-                    <div className="flex-1 p-4 flex items-start pt-8">
-                         <div className="flex w-full">
-                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
-                                <Bot className="w-3.5 h-3.5 text-blue-600" />
+                    <div className="flex-1 overflow-y-auto">
+                        <div className="p-4 pt-8 pb-2">
+                             <div className="flex w-full mb-6">
+                                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
+                                    <Bot className="w-3.5 h-3.5 text-blue-600" />
+                                </div>
+                                <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm text-sm text-slate-800 leading-relaxed max-w-[85%]">
+                                    <p>I'm ready to help. You can ask me about the issues I found, or detailed questions about specific positions.</p>
+                                </div>
                             </div>
-                            <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm text-sm text-slate-800 leading-relaxed max-w-[85%]">
-                                <p>I'm ready to help. You can ask me about the issues I found, or detailed questions about specific positions.</p>
-                            </div>
-                        </div>
-                    </div>
 
-                    <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-                        <div className="max-h-[300px] overflow-y-auto mb-2 hide-scrollbar">
                             <SuggestionList title="Suggested Actions">
                                 <SuggestionRow 
                                     onClick={startAnalysis} 
@@ -354,7 +347,42 @@ export function AssistantWidget() {
                                     description="Investigate the 8.7% increase"
                                 />
                             </SuggestionList>
+                        
+                            {threads.length > 0 && (
+                                <div className="mt-6">
+                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Active Conversations</h5>
+                                    <div className="space-y-3">
+                                        {threads.map(thread => (
+                                            <div 
+                                                key={thread.id}
+                                                onClick={() => { setActiveThreadId(thread.id); setView("chat"); }}
+                                                className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
+                                            >
+                                                <div className="flex items-center justify-between mb-1">
+                                                    <div className="flex items-center gap-2">
+                                                        {thread.type === 'overview' && <TrendingUp className="w-3.5 h-3.5 text-blue-500" />}
+                                                        {thread.type === 'issue' && <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                                                        {thread.type === 'general' && <MessageSquare className="w-3.5 h-3.5 text-slate-400" />}
+                                                        <span className={`font-semibold text-sm ${thread.type === 'overview' ? 'text-blue-900' : 'text-slate-900'}`}>
+                                                            {thread.title}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-[10px] text-slate-400">
+                                                        {thread.lastMessageAt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-slate-500 line-clamp-1 ml-5.5">
+                                                    {thread.messages[thread.messages.length-1].content.slice(0, 50)}...
+                                                </p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
+                    </div>
+
+                    <div className="p-3 bg-white border-t border-slate-100 shrink-0">
                         <div className="relative">
                             <input
                                 type="text"
@@ -390,40 +418,6 @@ export function AssistantWidget() {
                 <h4 className="font-semibold text-slate-900 mb-2">Analyzing Cost Data...</h4>
                 <p className="text-sm text-slate-500">Checking against 43 validation rules and historical patterns.</p>
             </motion.div>
-            )}
-
-            {view === "thread_list" && (
-                <motion.div
-                    key="thread_list"
-                    initial={{ x: -20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: -20, opacity: 0 }}
-                    className="flex-1 overflow-y-auto p-4 space-y-3"
-                >
-                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Active Conversations</h5>
-                    {threads.map(thread => (
-                        <div 
-                            key={thread.id}
-                            onClick={() => { setActiveThreadId(thread.id); setView("chat"); }}
-                            className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
-                        >
-                            <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-2">
-                                    {thread.type === 'overview' && <TrendingUp className="w-4 h-4 text-blue-500" />}
-                                    {thread.type === 'issue' && <AlertTriangle className="w-4 h-4 text-amber-500" />}
-                                    {thread.type === 'general' && <MessageSquare className="w-4 h-4 text-slate-400" />}
-                                    <span className={`font-semibold text-sm ${thread.type === 'overview' ? 'text-blue-900' : 'text-slate-900'}`}>
-                                        {thread.title}
-                                    </span>
-                                </div>
-                                <span className="text-[10px] text-slate-400">
-                                    {thread.lastMessageAt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                </span>
-                            </div>
-                            <p className="text-xs text-slate-500 line-clamp-1 ml-6">
-                                {thread.messages[thread.messages.length-1].content.slice(0, 60)}...
-                            </p>
-                        </div>
-                    ))}
-                </motion.div>
             )}
 
             {view === "chat" && activeThread && (
@@ -726,6 +720,7 @@ function FringeAnalysisCard() {
                     Exceeds the 5% threshold, triggering validation.
                  </p>
             </div>
+            
             <div className="bg-white p-3 rounded-lg border border-slate-200">
                 <h6 className="text-xs font-semibold text-slate-700 mb-2 uppercase">Driving Factors</h6>
                 <ul className="space-y-2">
@@ -745,8 +740,9 @@ function FringeAnalysisCard() {
                     </li>
                 </ul>
             </div>
+
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <h6 className="text-xs font-semibold text-slate-700 mb-1 uppercase">Analysis</h6>
+                <h6 className="text-xs font-semibold text-slate-700 mb-1 uppercase">Recommendation</h6>
                 <p className="text-xs text-slate-600 leading-relaxed">
                     The salary differential is 12.3%, so this fringe increase is proportional. However, the current justification fails to mention the new positions.
                 </p>
