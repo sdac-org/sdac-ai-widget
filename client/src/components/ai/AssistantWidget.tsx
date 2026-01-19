@@ -330,7 +330,12 @@ export function AssistantWidget() {
 
                             {threads.length > 0 && (
                                 <div className="mb-6">
-                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Recent ({Math.min(threads.length, 5)})</h5>
+                                    <div className="flex items-center justify-between mb-2 px-1">
+                                        <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Recent ({Math.min(threads.length, 5)})</h5>
+                                        <button className="text-[10px] text-blue-600 font-medium hover:text-blue-700 transition-colors">
+                                            View all history →
+                                        </button>
+                                    </div>
                                     <div className="space-y-3">
                                         {threads.slice(0, 5).map(thread => (
                                             <div 
@@ -356,11 +361,6 @@ export function AssistantWidget() {
                                                 </p>
                                             </div>
                                         ))}
-                                    </div>
-                                    <div className="mt-3 text-center">
-                                        <button className="text-xs text-blue-600 font-medium hover:text-blue-700 transition-colors">
-                                            View all history →
-                                        </button>
                                     </div>
                                 </div>
                             )}
