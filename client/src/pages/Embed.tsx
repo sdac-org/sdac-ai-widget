@@ -12,7 +12,14 @@ export default function EmbedPage() {
   width="400" 
   height="700" 
   frameborder="0" 
-  style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"
+  style="
+    position: fixed; 
+    bottom: 20px; 
+    right: 20px; 
+    z-index: 9999; 
+    border-radius: 12px; 
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  "
 ></iframe>`;
 
   const handleCopy = () => {
