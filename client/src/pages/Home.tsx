@@ -1,13 +1,10 @@
 import React from "react";
-import { DashboardLayout } from "@/components/sdac/DashboardLayout";
-import { CostReport } from "@/components/sdac/CostReport";
 import { AssistantWidget } from "@/components/ai/AssistantWidget";
 
 export default function Home() {
   return (
-    <DashboardLayout>
-      <CostReport />
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <AssistantWidget />
-    </DashboardLayout>
+    </div>
   );
 }
