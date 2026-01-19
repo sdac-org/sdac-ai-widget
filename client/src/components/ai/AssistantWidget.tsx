@@ -144,13 +144,14 @@ export function AssistantWidget() {
   const handleSendMessage = (text: string, threadIdOverride?: string) => {
     if (!text.trim()) return;
     
-    // If in welcome state, start a general thread
-    if (view === "welcome") {
+    const targetThreadId = threadIdOverride || activeThreadId;
+
+    // If in welcome state and no specific thread targeted, start a general thread
+    if (!targetThreadId && view === "welcome") {
         createGeneralThread(text);
         return;
     }
 
-    const targetThreadId = threadIdOverride || activeThreadId;
     if (!targetThreadId) return;
 
     // Add user message
