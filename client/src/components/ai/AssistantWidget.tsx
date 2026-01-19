@@ -327,29 +327,8 @@ export function AssistantWidget() {
                                 </div>
                             </div>
 
-                            <SuggestionList title="Suggested Actions">
-                                <SuggestionRow 
-                                    onClick={startAnalysis} 
-                                    label="Evaluate Potential Issues" 
-                                    icon={Search}
-                                    description="Run automated validation checks"
-                                />
-                                <SuggestionRow 
-                                    onClick={() => handleSendMessage("Compare to last quarter")} 
-                                    label="Compare Quarters" 
-                                    icon={History}
-                                    description="Review trends against Q2-2025"
-                                />
-                                <SuggestionRow 
-                                    onClick={() => handleSendMessage("Why is fringe high? Please analyze.")} 
-                                    label="Analyze Fringe Benefits" 
-                                    icon={TrendingUp}
-                                    description="Investigate the 8.7% increase"
-                                />
-                            </SuggestionList>
-                        
                             {threads.length > 0 && (
-                                <div className="mt-6">
+                                <div className="mb-6">
                                     <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Active Conversations ({threads.length})</h5>
                                     <div className="space-y-3">
                                         {threads.map(thread => (
@@ -382,7 +361,29 @@ export function AssistantWidget() {
                         </div>
                     </div>
 
-                    <div className="p-3 bg-white border-t border-slate-100 shrink-0">
+                    <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
+                        <div className="max-h-[160px] overflow-y-auto hide-scrollbar">
+                           <SuggestionList title="Suggested Actions">
+                                <SuggestionRow 
+                                    onClick={startAnalysis} 
+                                    label="Evaluate Potential Issues" 
+                                    icon={Search}
+                                    description="Run automated validation checks"
+                                />
+                                <SuggestionRow 
+                                    onClick={() => handleSendMessage("Compare to last quarter")} 
+                                    label="Compare Quarters" 
+                                    icon={History}
+                                    description="Review trends against Q2-2025"
+                                />
+                                <SuggestionRow 
+                                    onClick={() => handleSendMessage("Why is fringe high? Please analyze.")} 
+                                    label="Analyze Fringe Benefits" 
+                                    icon={TrendingUp}
+                                    description="Investigate the 8.7% increase"
+                                />
+                            </SuggestionList>
+                        </div>
                         <div className="relative">
                             <input
                                 type="text"
@@ -602,8 +603,8 @@ function SummaryComponent({ onCreateIssueThread, onStartChat }: { onCreateIssueT
 
 function SuggestionList({ title, children }: { title: string, children: React.ReactNode }) {
   return (
-    <div className="mb-4 px-1">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+    <div className="mb-0 px-1">
+      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
         <Sparkles className="w-3 h-3 text-blue-400" />
         {title}
       </p>
@@ -618,16 +619,16 @@ function SuggestionRow({ onClick, label, icon: Icon, description }: { onClick: (
   return (
     <button 
       onClick={onClick}
-      className="w-full flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl text-left hover:border-blue-300 hover:shadow-md hover:bg-blue-50/30 transition-all group"
+      className="w-full flex items-center gap-3 p-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-blue-300 hover:shadow-md hover:bg-blue-50/30 transition-all group"
     >
-      <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 group-hover:bg-blue-100 group-hover:border-blue-200 group-hover:text-blue-600 transition-colors">
-        <Icon className="w-4 h-4 text-slate-500 group-hover:text-blue-600" />
+      <div className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 group-hover:bg-blue-100 group-hover:border-blue-200 group-hover:text-blue-600 transition-colors">
+        <Icon className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-600" />
       </div>
-      <div>
-        <div className="text-sm font-semibold text-slate-700 group-hover:text-blue-800">{label}</div>
-        {description && <div className="text-xs text-slate-400 group-hover:text-blue-600/70">{description}</div>}
+      <div className="min-w-0">
+        <div className="text-xs font-semibold text-slate-700 group-hover:text-blue-800 truncate">{label}</div>
+        {description && <div className="text-[10px] text-slate-400 group-hover:text-blue-600/70 truncate">{description}</div>}
       </div>
-      <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-400" />
+      <ChevronRight className="w-3.5 h-3.5 text-slate-300 ml-auto group-hover:text-blue-400" />
     </button>
   );
 }
