@@ -450,7 +450,7 @@ export function AssistantWidget() {
                                     : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none'
                                 }`}>
                                     {msg.type === 'comparison' ? (
-                                        <ComparisonCard />
+                                        <ComparisonCard onDraftFeedback={() => handleSendMessage("Draft sendback for issues")} />
                                     ) : msg.type === 'fringe_analysis' ? (
                                         <FringeAnalysisCard />
                                     ) : (
@@ -650,7 +650,7 @@ function SuggestionPill({ onClick, label, icon: Icon }: { onClick: () => void, l
   );
 }
 
-function ComparisonCard() {
+function ComparisonCard({ onDraftFeedback }: { onDraftFeedback: () => void }) {
   return (
     <div className="w-full space-y-4">
       <p className="text-sm font-medium text-slate-800 mb-2">Comparing Q3-2025 to Q3-2024:</p>
@@ -703,9 +703,12 @@ function ComparisonCard() {
         </div>
       </div>
       
-      <button className="w-full py-2 bg-slate-900 text-white rounded-lg text-xs font-medium hover:bg-slate-800 transition-colors flex items-center justify-center gap-2">
-        <Sparkles className="w-3 h-3" />
-        Draft Sendback for Review
+      <button 
+        onClick={onDraftFeedback}
+        className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center gap-2 border border-blue-200"
+      >
+        <Sparkles className="w-3.5 h-3.5" />
+        Draft Feedback
       </button>
     </div>
   );
@@ -723,7 +726,6 @@ function FringeAnalysisCard() {
                     Exceeds the 5% threshold, triggering validation.
                  </p>
             </div>
-            
             <div className="bg-white p-3 rounded-lg border border-slate-200">
                 <h6 className="text-xs font-semibold text-slate-700 mb-2 uppercase">Driving Factors</h6>
                 <ul className="space-y-2">
@@ -743,9 +745,8 @@ function FringeAnalysisCard() {
                     </li>
                 </ul>
             </div>
-
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <h6 className="text-xs font-semibold text-slate-700 mb-1 uppercase">Recommendation</h6>
+                <h6 className="text-xs font-semibold text-slate-700 mb-1 uppercase">Analysis</h6>
                 <p className="text-xs text-slate-600 leading-relaxed">
                     The salary differential is 12.3%, so this fringe increase is proportional. However, the current justification fails to mention the new positions.
                 </p>
