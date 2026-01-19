@@ -12,11 +12,12 @@ import {
   ArrowRight,
   ArrowLeft,
   MessageSquare,
-  Plus
+  Plus,
+  Search
 } from "lucide-react";
 import { MOCK_ISSUES, QA_PAIRS, REPORT_DATA } from "@/lib/mock-data";
 
-type ViewState = "analyzing" | "thread_list" | "chat";
+type ViewState = "welcome" | "analyzing" | "thread_list" | "chat";
 
 type Message = {
   id: string;
@@ -35,17 +36,27 @@ type Thread = {
 };
 
 export function AssistantWidget() {
-  const [view, setView] = useState<ViewState>("analyzing");
+  const [view, setView] = useState<ViewState>("welcome");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Initialize Overview Thread
+  // Auto-scroll chat
   useEffect(() => {
-    // Only init if empty
-    if (threads.length === 0) {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [threads, activeThreadId, isTyping, view]);
+
+  const activeThread = threads.find(t => t.id === activeThreadId);
+
+  const startAnalysis = () => {
+    setView("analyzing");
+    
+    // Initialize Overview Thread during analysis
+    if (!threads.find(t => t.id === "overview")) {
         const overviewThread: Thread = {
             id: "overview",
             title: "Analysis Results",
@@ -58,32 +69,14 @@ export function AssistantWidget() {
             }],
             lastMessageAt: new Date()
         };
-        setThreads([overviewThread]);
+        setThreads(prev => [overviewThread, ...prev]);
     }
-  }, []);
 
-  // Auto-start analysis transition
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      // Transition from analyzing to showing the thread list (which contains Overview)
-      // Or directly to the Overview thread?
-      // Let's go to Thread List, but maybe auto-open Overview for the first time?
-      // User requirement: "overview is a chat".
-      // Let's start by showing the Overview thread active.
-      setView("chat");
-      setActiveThreadId("overview");
+    setTimeout(() => {
+        setView("chat");
+        setActiveThreadId("overview");
     }, 2000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [threads, activeThreadId, isTyping, view]);
-
-  const activeThread = threads.find(t => t.id === activeThreadId);
+  };
 
   const handleBackToList = () => {
       setView("thread_list");
@@ -139,9 +132,6 @@ export function AssistantWidget() {
       setView("chat");
       
       if (initialMsg) {
-          // We need to wait for state update, but we can just call handleSendMessage with the new ID
-          // Actually handleSendMessage uses activeThreadId from state which might be stale in this closure if not careful.
-          // Better to just push the user message into the thread creation.
           setTimeout(() => handleSendMessage(initialMsg, newThread.id), 100);
       }
   };
@@ -149,6 +139,12 @@ export function AssistantWidget() {
   const handleSendMessage = (text: string, threadIdOverride?: string) => {
     if (!text.trim()) return;
     
+    // If in welcome state, start a general thread
+    if (view === "welcome") {
+        createGeneralThread(text);
+        return;
+    }
+
     const targetThreadId = threadIdOverride || activeThreadId;
     if (!targetThreadId) return;
 
@@ -224,7 +220,7 @@ export function AssistantWidget() {
             };
         }
         return t;
-      }));
+    }));
 
     }, 1500);
   };
@@ -234,8 +230,12 @@ export function AssistantWidget() {
       {/* Header */}
       <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3">
-            {view === "chat" && activeThreadId ? (
+            {view === "chat" && activeThreadId && activeThreadId !== "overview" ? (
                 <button onClick={handleBackToList} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
+                    <ArrowLeft className="w-5 h-5 text-slate-300" />
+                </button>
+            ) : view === "thread_list" ? (
+                 <button onClick={() => setView("welcome")} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
                     <ArrowLeft className="w-5 h-5 text-slate-300" />
                 </button>
             ) : (
@@ -255,7 +255,7 @@ export function AssistantWidget() {
           </div>
         </div>
 
-        {view !== "analyzing" && (
+        {view !== "analyzing" && view !== "welcome" && (
              <button 
                 onClick={() => createGeneralThread()} 
                 className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
@@ -269,6 +269,50 @@ export function AssistantWidget() {
       {/* Content Area */}
       <div className="flex-1 bg-slate-50 relative flex flex-col overflow-hidden">
         <AnimatePresence mode="wait">
+            {view === "welcome" && (
+                <motion.div
+                    key="welcome"
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    className="flex flex-col flex-1 h-full"
+                >
+                    <div className="flex-1 p-4 flex items-start pt-8">
+                         <div className="flex w-full">
+                            <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
+                                <Bot className="w-3.5 h-3.5 text-blue-600" />
+                            </div>
+                            <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm text-sm text-slate-800 leading-relaxed max-w-[85%]">
+                                <p>I'm ready to help. You can ask me about the issues I found, or detailed questions about specific positions.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="p-3 bg-white border-t border-slate-100 shrink-0">
+                        <div className="flex gap-2 mb-3 overflow-x-auto pb-1 hide-scrollbar">
+                            <SuggestionPill onClick={startAnalysis} label="Evaluate potential issues" icon={Search} />
+                            <SuggestionPill onClick={() => handleSendMessage("Compare to last quarter")} label="Compare quarters" icon={History} />
+                            <SuggestionPill onClick={() => handleSendMessage("Why is fringe high?")} label="Fringe analysis" icon={TrendingUp} />
+                        </div>
+                        <div className="relative">
+                            <input
+                                type="text"
+                                value={inputValue}
+                                onChange={(e) => setInputValue(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputValue)}
+                                placeholder="Ask anything..."
+                                className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                            />
+                            <button 
+                                onClick={() => handleSendMessage(inputValue)}
+                                disabled={!inputValue.trim()}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <Send className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+                    </div>
+                </motion.div>
+            )}
+
             {view === "analyzing" && (
             <motion.div 
                 key="analyzing"
