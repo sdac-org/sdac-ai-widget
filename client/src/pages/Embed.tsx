@@ -6,20 +6,14 @@ import { Button } from "@/components/ui/button";
 
 export default function EmbedPage() {
   const [copied, setCopied] = useState(false);
-
-  const embedCode = `<!-- SDAC AI Assistant Embed Code -->
-<script>
-  window.SDAC_SETTINGS = {
-    district_id: "CURRENT_DISTRICT_ID", // Replace with dynamic ID
-    theme: "light",
-    position: "bottom-right"
-  };
-</script>
-<script 
-  src="https://cdn.sdac-assistant.gov/widget/v1/bundle.js" 
-  async 
-  defer
-></script>`;
+  
+  const embedCode = `<iframe 
+  src="${window.location.origin}/widget"
+  width="400" 
+  height="700" 
+  frameborder="0" 
+  style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"
+></iframe>`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(embedCode);
@@ -119,9 +113,9 @@ export default function EmbedPage() {
             <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 flex gap-3">
               <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
               <div>
-                <h4 className="font-semibold text-blue-900 text-sm">Security Note</h4>
+                <h4 className="font-semibold text-blue-900 text-sm">Embed Note</h4>
                 <p className="text-sm text-blue-700 mt-1">
-                  This snippet uses a public CDN. For production deployment, ensure you have whitelisted <code className="font-mono font-bold">cdn.sdac-assistant.gov</code> in your Content Security Policy (CSP).
+                  This iframe will load the assistant widget directly from the current domain. Ensure the parent page allows framing if you encounter issues.
                 </p>
               </div>
             </div>

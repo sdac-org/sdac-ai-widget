@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/Home";
 import EmbedPage from "@/pages/Embed";
+import Widget from "@/pages/Widget";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -12,6 +13,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/embed" component={EmbedPage} />
+      <Route path="/widget" component={Widget} />
       <Route component={NotFound} />
     </Switch>
   );
