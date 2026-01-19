@@ -15,7 +15,8 @@ import {
   Plus,
   Search,
   Copy,
-  Check
+  Check,
+  ChevronDown
 } from "lucide-react";
 import { MOCK_ISSUES, QA_PAIRS, REPORT_DATA } from "@/lib/mock-data";
 
@@ -329,9 +330,9 @@ export function AssistantWidget() {
 
                             {threads.length > 0 && (
                                 <div className="mb-6">
-                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Active Conversations ({threads.length})</h5>
+                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Recent ({Math.min(threads.length, 5)})</h5>
                                     <div className="space-y-3">
-                                        {threads.map(thread => (
+                                        {threads.slice(0, 5).map(thread => (
                                             <div 
                                                 key={thread.id}
                                                 onClick={() => { setActiveThreadId(thread.id); setView("chat"); }}
@@ -355,6 +356,11 @@ export function AssistantWidget() {
                                                 </p>
                                             </div>
                                         ))}
+                                    </div>
+                                    <div className="mt-3 text-center">
+                                        <button className="text-xs text-blue-600 font-medium hover:text-blue-700 transition-colors">
+                                            View all history →
+                                        </button>
                                     </div>
                                 </div>
                             )}
@@ -602,15 +608,32 @@ function SummaryComponent({ onCreateIssueThread, onStartChat }: { onCreateIssueT
 }
 
 function SuggestionList({ title, children }: { title: string, children: React.ReactNode }) {
+  const [isExpanded, setIsExpanded] = useState(true);
+
   return (
     <div className="mb-0 px-1">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-        <Sparkles className="w-3 h-3 text-blue-400" />
-        {title}
-      </p>
-      <div className="flex flex-col gap-2">
-        {children}
-      </div>
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 group"
+      >
+        <div className="flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-blue-400" />
+            {title}
+        </div>
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+      </button>
+      <AnimatePresence>
+        {isExpanded && (
+            <motion.div 
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="flex flex-col gap-2 overflow-hidden"
+            >
+                {children}
+            </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
