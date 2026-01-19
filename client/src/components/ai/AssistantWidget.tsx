@@ -13,7 +13,8 @@ import {
   ArrowLeft,
   MessageSquare,
   Plus,
-  Search
+  Search,
+  Copy
 } from "lucide-react";
 import { MOCK_ISSUES, QA_PAIRS, REPORT_DATA } from "@/lib/mock-data";
 
@@ -23,7 +24,8 @@ type Message = {
   id: string;
   role: "user" | "ai";
   content: string;
-  type?: "text" | "comparison" | "summary_component";
+  type?: "text" | "comparison" | "summary_component" | "issue_init";
+  issueData?: typeof MOCK_ISSUES[0];
 };
 
 type Thread = {
@@ -102,7 +104,9 @@ export function AssistantWidget() {
               {
                   id: "init",
                   role: "ai",
-                  content: `I've opened a detailed view for **${issue.title}**.\n\n**Issue:** ${issue.description}\n**Impact:** ${issue.amount ? '$'+issue.amount.toLocaleString() : 'N/A'}\n\nHow would you like to handle this? I can draft a specific comment or check historical context.`
+                  content: `I've opened a detailed view for **${issue.title}**.\n\n**Issue:** ${issue.description}\n**Impact:** ${issue.amount ? '$'+issue.amount.toLocaleString() : 'N/A'}\n\nHow would you like to handle this? I can draft a specific comment or check historical context.`,
+                  type: "issue_init",
+                  issueData: issue
               }
           ]
       };
@@ -189,6 +193,33 @@ export function AssistantWidget() {
           role: "ai",
           content: `I've drafted a sendback based on the 3 issues found:\n\n"Please review the following items in your Q3-2025 submission:\n\n1. Position #7 (Goldberg) is listed with Source Code 4 (Federal) but has claimed costs. Federal costs are not eligible for SDAC reimbursement.\n2. Position #12 has $0 salary without an explanatory comment.\n3. The justification mentions general increases but does not account for the new positions (Williams, Lee) which contribute to the 12.3% variance.\n\nPlease correct these items and resubmit."`
         };
+      }
+      // Check for specific issue feedback generation
+      else if (lowerText.includes("generate feedback") && lowerText.includes("draft")) {
+         // Find the issue related to this thread if possible, or try to infer
+         const thread = threads.find(t => t.id === targetThreadId);
+         const issue = MOCK_ISSUES.find(i => i.id === thread?.issueId);
+         
+         let feedbackContent = "";
+         if (issue) {
+             if (issue.id === 1) { // Goldberg
+                 feedbackContent = `"Position #7 (Goldberg) is listed with Source Code 4 (Federal) but claims $7,196 in SDAC costs. Federal expenditures are not eligible for state reimbursement. Please verify the source code or remove the claimed costs."`;
+             } else if (issue.id === 2) { // Position 12
+                 feedbackContent = `"Position #12 is listed with $0 salary but has no explanatory comment. Please add a comment explaining why this position has no salary (e.g., vacancy, leave, etc.) or correct the salary amount."`;
+             } else if (issue.id === 3) { // Justification
+                 feedbackContent = `"The provided justification mentions general increases but does not account for the new positions (Williams, Lee) which contribute significantly to the 12.3% variance. Please update the justification to explicitly mention these staffing changes."`;
+             } else {
+                 feedbackContent = `"Please review the issue regarding ${issue.title}: ${issue.description}."`;
+             }
+         } else {
+             feedbackContent = `"Please review the flagged issues."`;
+         }
+
+         responseMsg = {
+             id: Date.now().toString() + "_ai",
+             role: "ai",
+             content: `Here is a draft feedback message for this issue:\n\n${feedbackContent}`
+         };
       }
       // Standard Q&A matching
       else {
@@ -408,7 +439,20 @@ export function AssistantWidget() {
                                     {msg.type === 'comparison' ? (
                                         <ComparisonCard />
                                     ) : (
-                                        <FormattedMessage content={msg.content} />
+                                        <>
+                                            <FormattedMessage content={msg.content} />
+                                            {msg.type === 'issue_init' && (
+                                                <div className="mt-3 pt-3 border-t border-slate-100">
+                                                    <button 
+                                                        onClick={() => handleSendMessage("Generate feedback draft")}
+                                                        className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center gap-2 border border-blue-200"
+                                                    >
+                                                        <Sparkles className="w-3.5 h-3.5" />
+                                                        Generate Feedback
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </>
                                     )}
                                 </div>
                             )}
