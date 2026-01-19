@@ -62,7 +62,7 @@ export function AssistantWidget() {
     if (!threads.find(t => t.id === "overview")) {
         const overviewThread: Thread = {
             id: "overview",
-            title: "Analysis Results",
+            title: "Potential Issues Evaluation",
             type: "overview",
             messages: [{
                 id: "summary-component",
@@ -350,7 +350,7 @@ export function AssistantWidget() {
                         
                             {threads.length > 0 && (
                                 <div className="mt-6">
-                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Active Conversations</h5>
+                                    <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1 mb-2">Active Conversations ({threads.length})</h5>
                                     <div className="space-y-3">
                                         {threads.map(thread => (
                                             <div 
