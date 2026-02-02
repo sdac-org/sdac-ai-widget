@@ -1,24 +1,22 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { 
-  Bot, 
-  X, 
-  Send, 
-  Sparkles, 
-  ChevronRight, 
+import {
+  Bot,
+  X,
+  Send,
+  ChevronRight,
   AlertTriangle,
   TrendingUp,
-  History,
-  ArrowRight,
   ArrowLeft,
   MessageSquare,
   Plus,
-  Search,
-  Copy,
-  Check,
-  ChevronDown
+  RotateCcw,
 } from "lucide-react";
-import { MOCK_ISSUES, QA_PAIRS, REPORT_DATA } from "@/lib/mock-data";
+import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
+import { useSessionContext } from "@/hooks/useSessionContext";
+import { SuggestedActions } from "./components/SuggestedActions";
+import { MessageRenderer } from "@/renderers";
+import type { Feature } from "@/features";
 
 type ViewState = "main" | "analyzing" | "chat";
 
@@ -26,8 +24,8 @@ type Message = {
   id: string;
   role: "user" | "ai";
   content: string;
-  type?: "text" | "comparison" | "summary_component" | "issue_init" | "feedback_draft" | "fringe_analysis";
-  issueData?: typeof MOCK_ISSUES[0];
+  /** Special local UI component (not from Mastra) */
+  isLocalComponent?: "summary";
 };
 
 type Thread = {
@@ -36,7 +34,7 @@ type Thread = {
   type: "overview" | "issue" | "general";
   messages: Message[];
   lastMessageAt: Date;
-  issueId?: number; // Link to specific issue if applicable
+  issueId?: number;
 };
 
 export function AssistantWidget({ onClose }: { onClose?: () => void }) {
@@ -45,237 +43,447 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const agentId = import.meta.env.VITE_MASTRA_AGENT_ID as string | undefined;
 
-  // Auto-scroll chat
+  const { context: sessionContext, setConversationId, clearConversation } = useSessionContext({
+    reportId: (import.meta.env.VITE_REPORT_ID as string) || "",
+    user: {
+      id: (import.meta.env.VITE_DEMO_USER_ID as string) || "demo-user",
+      name: (import.meta.env.VITE_DEMO_USER_NAME as string) || "Demo User",
+      role: (import.meta.env.VITE_DEMO_USER_ROLE as string) || "District Admin",
+    },
+  });
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [threads, activeThreadId, isTyping, view]);
 
-  const activeThread = threads.find(t => t.id === activeThreadId);
+  const activeThread = threads.find((t) => t.id === activeThreadId);
 
   const startAnalysis = () => {
     setView("analyzing");
-    
-    // Initialize Overview Thread during analysis
-    if (!threads.find(t => t.id === "overview")) {
-        const overviewThread: Thread = {
-            id: "overview",
-            title: "Potential Issues Evaluation",
-            type: "overview",
-            messages: [{
-                id: "summary-component",
-                role: "ai",
-                content: "",
-                type: "summary_component"
-            }],
-            lastMessageAt: new Date()
-        };
-        setThreads(prev => [overviewThread, ...prev]);
+
+    if (!threads.find((t) => t.id === "overview")) {
+      const overviewThread: Thread = {
+        id: "overview",
+        title: "Potential Issues Evaluation",
+        type: "overview",
+        messages: [
+          {
+            id: "summary-component",
+            role: "ai",
+            content: "",
+            isLocalComponent: "summary",
+          },
+        ],
+        lastMessageAt: new Date(),
+      };
+      setThreads((prev) => [overviewThread, ...prev]);
     }
 
     setTimeout(() => {
-        setView("chat");
-        setActiveThreadId("overview");
+      setView("chat");
+      setActiveThreadId("overview");
     }, 2000);
   };
 
   const handleBackToMain = () => {
-      setView("main");
-      setActiveThreadId(null);
+    setView("main");
+    setActiveThreadId(null);
   };
 
-  const createIssueThread = (issue: typeof MOCK_ISSUES[0]) => {
-      // Check if thread exists
-      const existing = threads.find(t => t.issueId === issue.id);
-      if (existing) {
-          setActiveThreadId(existing.id);
-          setView("chat");
-          return;
-      }
-
-      const newThread: Thread = {
-          id: `issue-${issue.id}`,
-          title: issue.title,
-          type: "issue",
-          issueId: issue.id,
-          lastMessageAt: new Date(),
-          messages: [
-              {
-                  id: "init",
-                  role: "ai",
-                  content: `I've opened a detailed view for **${issue.title}**.\n\n**Issue:** ${issue.description}\n**Impact:** ${issue.amount ? '$'+issue.amount.toLocaleString() : 'N/A'}\n\nHow would you like to handle this? I can draft a specific comment or check historical context.`,
-                  type: "issue_init",
-                  issueData: issue
-              }
-          ]
-      };
-
-      setThreads(prev => [newThread, ...prev]);
-      setActiveThreadId(newThread.id);
+  const createIssueThread = (issue: (typeof MOCK_ISSUES)[0]) => {
+    const existing = threads.find((t) => t.issueId === issue.id);
+    if (existing) {
+      setActiveThreadId(existing.id);
       setView("chat");
+      return;
+    }
+
+    // Create JSON response for issue init
+    const initContent = JSON.stringify({
+      type: "text",
+      data: {
+        content: `I've opened a detailed view for **${issue.title}**.\n\n**Issue:** ${issue.description}\n**Impact:** ${issue.amount ? "$" + issue.amount.toLocaleString() : "N/A"}\n\nHow would you like to handle this? I can draft a specific comment or check historical context.`,
+      },
+    });
+
+    const newThread: Thread = {
+      id: `issue-${issue.id}`,
+      title: issue.title,
+      type: "issue",
+      issueId: issue.id,
+      lastMessageAt: new Date(),
+      messages: [{ id: "init", role: "ai", content: initContent }],
+    };
+
+    setThreads((prev) => [newThread, ...prev]);
+    setActiveThreadId(newThread.id);
+    setView("chat");
   };
 
   const createGeneralThread = (initialMsg?: string) => {
-      const newThread: Thread = {
-          id: `general-${Date.now()}`,
-          title: "New Conversation",
-          type: "general",
-          lastMessageAt: new Date(),
-          messages: [
-              {
-                  id: "welcome",
-                  role: "ai",
-                  content: "I'm ready to help. You can ask me about source codes, cost pools, or general validation rules."
-              }
-          ]
-      };
-      
-      setThreads(prev => [newThread, ...prev]);
-      setActiveThreadId(newThread.id);
-      setView("chat");
-      
-      if (initialMsg) {
-          setTimeout(() => handleSendMessage(initialMsg, newThread.id), 100);
-      }
+    // Create JSON response for welcome message
+    const welcomeContent = JSON.stringify({
+      type: "text",
+      data: {
+        content:
+          "I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.",
+      },
+    });
+
+    const newThread: Thread = {
+      id: `general-${Date.now()}`,
+      title: "New Conversation",
+      type: "general",
+      lastMessageAt: new Date(),
+      messages: [{ id: "welcome", role: "ai", content: welcomeContent }],
+    };
+
+    setThreads((prev) => [newThread, ...prev]);
+    setActiveThreadId(newThread.id);
+    setView("chat");
+
+    if (initialMsg) {
+      setTimeout(() => handleSendMessage(initialMsg, newThread.id), 100);
+    }
   };
 
-  const handleSendMessage = (text: string, threadIdOverride?: string) => {
+  const handleFeatureSelect = (feature: Feature, prompt: string) => {
+    if (feature.id === "evaluate-issues") {
+      startAnalysis();
+      return;
+    }
+
+    if (feature.startsNewThread) {
+      createGeneralThread(prompt);
+      return;
+    }
+
+    if (prompt) {
+      handleSendMessage(prompt);
+    }
+  };
+
+  const fetchAgentReply = async (
+    text: string,
+    threadId: string,
+    onDelta?: (delta: string) => void
+  ): Promise<{ content: string | null; conversationId?: string; turnNumber?: number }> => {
+    // Simplified payload - backend manages conversation history
+    const payload = {
+      agentId,
+      conversationId: sessionContext.conversationId,
+      reportId: sessionContext.reportId,
+      userId: sessionContext.user.id,
+      sessionId: sessionContext.sessionId,
+      message: text,
+      stream: true,
+    };
+
+    try {
+      const response = await fetch("/api/agent-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        return { content: null };
+      }
+
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        const reader = response.body?.getReader();
+        if (!reader) return { content: null };
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+        let responseConversationId: string | undefined;
+        let responseTurnNumber: number | undefined;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const events = buffer.split("\n\n");
+          buffer = events.pop() ?? "";
+
+          for (const eventBlock of events) {
+            // Parse named SSE events (event: type\ndata: {...})
+            const lines = eventBlock.split("\n");
+            let eventType = "";
+            let eventData = "";
+
+            for (const line of lines) {
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                eventData = line.slice(5).trim();
+              }
+            }
+
+            if (!eventData) continue;
+            if (eventData.trim() === "[DONE]") break;
+
+            try {
+              const json = JSON.parse(eventData);
+
+              switch (eventType) {
+                case "metadata":
+                  // Store conversation metadata from server
+                  responseConversationId = json.conversationId;
+                  responseTurnNumber = json.turnNumber;
+                  break;
+
+                case "delta":
+                  // Stream text content
+                  if (json.content) {
+                    fullText += json.content;
+                    onDelta?.(json.content);
+                  }
+                  break;
+
+                case "usage":
+                case "done":
+                  // Optional: could log usage or handle completion
+                  break;
+
+                default:
+                  // Fallback: try legacy parsing for backwards compatibility
+                  const parsed = extractStreamData(eventData);
+                  if (parsed.delta) {
+                    fullText += parsed.delta;
+                    onDelta?.(parsed.delta);
+                  }
+                  if (parsed.conversationId) {
+                    responseConversationId = parsed.conversationId;
+                  }
+                  if (parsed.turnNumber !== undefined) {
+                    responseTurnNumber = parsed.turnNumber;
+                  }
+              }
+            } catch {
+              // If JSON parse fails, might be raw text
+              if (eventData.trim() !== "[DONE]") {
+                fullText += eventData;
+                onDelta?.(eventData);
+              }
+            }
+          }
+        }
+
+        return {
+          content: fullText || null,
+          conversationId: responseConversationId,
+          turnNumber: responseTurnNumber,
+        };
+      }
+
+      const data = await response.json().catch(() => null);
+      const raw = data?.data ?? data;
+      const content =
+        raw?.text ?? raw?.message?.content ?? raw?.content ?? raw?.response ?? null;
+      return {
+        content: typeof content === "string" ? content : null,
+        conversationId: raw?.conversationId,
+        turnNumber: raw?.turnNumber,
+      };
+    } catch {
+      return { content: null };
+    }
+  };
+
+  const extractStreamData = (payload: string): {
+    delta: string | null;
+    conversationId?: string;
+    turnNumber?: number;
+  } => {
+    try {
+      const json = JSON.parse(payload);
+
+      // Extract conversation metadata if present
+      const conversationId = json?.conversationId;
+      const turnNumber = json?.turnNumber;
+
+      if (json?.type === "text" && typeof json.text === "string") {
+        return { delta: json.text, conversationId, turnNumber };
+      }
+
+      if (
+        json?.type === "text-delta" &&
+        typeof json?.payload?.text === "string"
+      ) {
+        return { delta: json.payload.text, conversationId, turnNumber };
+      }
+
+      if (json?.delta?.type === "text" && typeof json.delta.text === "string") {
+        return { delta: json.delta.text, conversationId, turnNumber };
+      }
+
+      const delta =
+        json?.delta ??
+        json?.text ??
+        json?.content ??
+        json?.message?.content ??
+        json?.choices?.[0]?.delta?.content ??
+        json?.choices?.[0]?.message?.content ??
+        json?.data?.text;
+
+      return {
+        delta: typeof delta === "string" ? delta : null,
+        conversationId,
+        turnNumber,
+      };
+    } catch {
+      return { delta: payload };
+    }
+  };
+
+  const handleSendMessage = async (text: string, threadIdOverride?: string) => {
     if (!text.trim()) return;
-    
+
     const targetThreadId = threadIdOverride || activeThreadId;
 
-    // If in main state and no specific thread targeted, start a general thread
     if (!targetThreadId && view === "main") {
-        createGeneralThread(text);
-        return;
+      createGeneralThread(text);
+      return;
     }
 
     if (!targetThreadId) return;
 
-    // Add user message
-    const newMsg: Message = { id: Date.now().toString(), role: "user", content: text };
-    
-    setThreads(prev => prev.map(t => {
+    const newMsg: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: text,
+    };
+
+    setThreads((prev) =>
+      prev.map((t) => {
         if (t.id === targetThreadId) {
-            return {
-                ...t,
-                messages: [...t.messages, newMsg],
-                lastMessageAt: new Date(),
-                title: t.type === 'general' && t.messages.length <= 1 ? text.slice(0, 30) + "..." : t.title
-            };
+          return {
+            ...t,
+            messages: [...t.messages, newMsg],
+            lastMessageAt: new Date(),
+            title:
+              t.type === "general" && t.messages.length <= 1
+                ? text.slice(0, 30) + "..."
+                : t.title,
+          };
         }
         return t;
-    }));
+      })
+    );
 
     setInputValue("");
     setIsTyping(true);
 
-    // Process response
-    setTimeout(() => {
-      setIsTyping(false);
-      const lowerText = text.toLowerCase();
-      
-      let responseMsg: Message;
-
-      // Check for Comparison trigger
-      if (lowerText.includes("compare") && lowerText.includes("quarter")) {
-          responseMsg = {
-            id: Date.now().toString() + "_ai",
-            role: "ai",
-            content: "Here is the comparison to last quarter:",
-            type: "comparison"
-          };
-      }
-      // Check for fringe analysis
-      else if (lowerText.includes("fringe") && lowerText.includes("analyze")) {
-          responseMsg = {
-            id: Date.now().toString() + "_ai",
-            role: "ai",
-            content: "Here is the analysis of the fringe benefit variance:",
-            type: "fringe_analysis"
-          };
-      }
-      // Check for Draft Sendback trigger
-      else if (lowerText.includes("draft") && lowerText.includes("sendback")) {
-         responseMsg = {
-          id: Date.now().toString() + "_ai",
-          role: "ai",
-          content: `I've drafted a sendback based on the 3 issues found:\n\n"Please review the following items in your Q3-2025 submission:\n\n1. Position #7 (Goldberg) is listed with Source Code 4 (Federal) but has claimed costs. Federal costs are not eligible for SDAC reimbursement.\n2. Position #12 has $0 salary without an explanatory comment.\n3. The justification mentions general increases but does not account for the new positions (Williams, Lee) which contribute to the 12.3% variance.\n\nPlease correct these items and resubmit."`,
-          type: "feedback_draft"
-        };
-      }
-      // Check for specific issue feedback generation
-      else if (lowerText.includes("generate feedback") && lowerText.includes("draft")) {
-         // Find the issue related to this thread if possible, or try to infer
-         const thread = threads.find(t => t.id === targetThreadId);
-         const issue = MOCK_ISSUES.find(i => i.id === thread?.issueId);
-         
-         let feedbackContent = "";
-         if (issue) {
-             if (issue.id === 1) { // Goldberg
-                 feedbackContent = `"Position #7 (Goldberg) is listed with Source Code 4 (Federal) but claims $7,196 in SDAC costs. Federal expenditures are not eligible for state reimbursement. Please verify the source code or remove the claimed costs."`;
-             } else if (issue.id === 2) { // Position 12
-                 feedbackContent = `"Position #12 is listed with $0 salary but has no explanatory comment. Please add a comment explaining why this position has no salary (e.g., vacancy, leave, etc.) or correct the salary amount."`;
-             } else if (issue.id === 3) { // Justification
-                 feedbackContent = `"The provided justification mentions general increases but does not account for the new positions (Williams, Lee) which contribute significantly to the 12.3% variance. Please update the justification to explicitly mention these staffing changes."`;
-             } else {
-                 feedbackContent = `"Please review the issue regarding ${issue.title}: ${issue.description}."`;
-             }
-         } else {
-             feedbackContent = `"Please review the flagged issues."`;
-         }
-
-         responseMsg = {
-             id: Date.now().toString() + "_ai",
-             role: "ai",
-             content: `Here is a draft feedback message for this issue:\n\n${feedbackContent}`,
-             type: "feedback_draft"
-         };
-      }
-      // Standard Q&A matching
-      else {
-        const match = QA_PAIRS.find(pair => 
-            pair.triggers.some(trigger => lowerText.includes(trigger))
-        );
-
-        if (match) {
-            responseMsg = {
-                id: Date.now().toString() + "_ai",
-                role: "ai",
-                content: match.answer
-            };
-        } else {
-            responseMsg = {
-                id: Date.now().toString() + "_ai",
-                role: "ai",
-                content: "I'm not sure about that. Try asking about source codes, cost pools, or justification details."
-            };
-        }
-      }
-
-      setThreads(prev => prev.map(t => {
+    const streamMessageId = Date.now().toString() + "_ai_stream";
+    setStreamingMessageId(streamMessageId);
+    setThreads((prev) =>
+      prev.map((t) => {
         if (t.id === targetThreadId) {
-            return {
-                ...t,
-                messages: [...t.messages, responseMsg],
-                lastMessageAt: new Date()
-            };
+          return {
+            ...t,
+            messages: [
+              ...t.messages,
+              { id: streamMessageId, role: "ai", content: "" },
+            ],
+            lastMessageAt: new Date(),
+          };
         }
         return t;
-    }));
+      })
+    );
 
-    }, 1500);
+    const agentReply = await fetchAgentReply(text, targetThreadId, (delta) => {
+      setThreads((prev) =>
+        prev.map((t) => {
+          if (t.id === targetThreadId) {
+            return {
+              ...t,
+              messages: t.messages.map((m) =>
+                m.id === streamMessageId
+                  ? { ...m, content: m.content + delta }
+                  : m
+              ),
+              lastMessageAt: new Date(),
+            };
+          }
+          return t;
+        })
+      );
+    });
+
+    let responseMsg: Message;
+
+    if (agentReply.content) {
+      responseMsg = {
+        id: streamMessageId,
+        role: "ai",
+        content: agentReply.content,
+      };
+
+      // Save conversation ID if this is a new conversation
+      if (agentReply.conversationId && !sessionContext.conversationId) {
+        setConversationId(agentReply.conversationId);
+      }
+    } else {
+      // Return error as JSON
+      responseMsg = {
+        id: streamMessageId,
+        role: "ai",
+        content: JSON.stringify({
+          type: "text",
+          data: {
+            content:
+              "Sorry, I'm unable to process your request at the moment. Please try again later.",
+          },
+        }),
+      };
+    }
+
+    setIsTyping(false);
+    setStreamingMessageId(null);
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.id === targetThreadId) {
+          const exists = t.messages.some((m) => m.id === responseMsg.id);
+          return {
+            ...t,
+            messages: exists
+              ? t.messages.map((m) =>
+                  m.id === responseMsg.id ? responseMsg : m
+                )
+              : [...t.messages, responseMsg],
+            lastMessageAt: new Date(),
+          };
+        }
+        return t;
+      })
+    );
   };
 
   const handleClose = () => {
     if (onClose) onClose();
-    window.parent.postMessage({ type: 'close-widget' }, '*');
-    // Also post to window (self) in case we are in standalone mode and not using onClose prop
-    // (Though onClose prop is preferred for standalone parent-child communication)
-    window.postMessage({ type: 'close-widget' }, '*'); 
+    window.parent.postMessage({ type: "close-widget" }, "*");
+    window.postMessage({ type: "close-widget" }, "*");
+  };
+
+  const handleStartFresh = () => {
+    // Clear backend conversation (starts new conversation with Mastra)
+    clearConversation();
+    // Clear all local threads
+    setThreads([]);
+    setActiveThreadId(null);
+    // Return to main view
+    setView("main");
   };
 
   return (
@@ -283,20 +491,25 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       {/* Header */}
       <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3">
-            {view === "chat" && (
-                <button onClick={handleBackToMain} className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1">
-                    <ArrowLeft className="w-5 h-5 text-slate-300" />
-                </button>
-            )}
-            {view === "main" && (
-                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-                    <Bot className="w-5 h-5 text-white" />
-                </div>
-            )}
-          
+          {view === "chat" && (
+            <button
+              onClick={handleBackToMain}
+              className="p-1 hover:bg-slate-800 rounded-full transition-colors -ml-1"
+            >
+              <ArrowLeft className="w-5 h-5 text-slate-300" />
+            </button>
+          )}
+          {view === "main" && (
+            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
+              <Bot className="w-5 h-5 text-white" />
+            </div>
+          )}
+
           <div>
             <h3 className="font-bold text-sm">
-                {view === "chat" && activeThread ? activeThread.title : "SDAC Assistant"}
+              {view === "chat" && activeThread
+                ? activeThread.title
+                : "SDAC Assistant"}
             </h3>
             <div className="flex items-center gap-1.5 text-[10px] text-slate-300">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -306,502 +519,327 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         </div>
 
         <div className="flex items-center gap-1">
-            {view !== "analyzing" && view !== "main" && (
-                <button 
-                    onClick={() => createGeneralThread()} 
-                    className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
-                    title="New Chat"
-                >
-                    <Plus className="w-4 h-4" />
-                </button>
-            )}
-            <button 
-                onClick={handleClose}
-                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors ml-1"
-                title="Close Widget"
-            >
-                <X className="w-4 h-4" />
-            </button>
+          {view !== "analyzing" && view !== "main" && (
+            <>
+              <button
+                onClick={() => createGeneralThread()}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
+                title="New Chat"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleStartFresh}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
+                title="Start Fresh (Clear All)"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            </>
+          )}
+          <button
+            onClick={handleClose}
+            className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors ml-1"
+            title="Close Widget"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
       {/* Content Area */}
       <div className="flex-1 bg-slate-50 relative flex flex-col overflow-hidden">
         <AnimatePresence mode="wait">
-            {view === "main" && (
-                <motion.div
-                    key="main"
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    className="flex flex-col flex-1 h-full"
-                >
-                    <div className="flex-1 overflow-y-auto">
-                        <div className="p-4 pt-8 pb-2">
-                             <div className="flex w-full mb-6">
-                                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
-                                    <Bot className="w-3.5 h-3.5 text-blue-600" />
-                                </div>
-                                <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm text-sm text-slate-800 leading-relaxed max-w-[85%]">
-                                    <p>I'm ready to help. You can ask me about the issues I found, or detailed questions about specific positions.</p>
-                                </div>
-                            </div>
-
-                            {threads.length > 0 && (
-                                <div className="mb-6">
-                                    <div className="flex items-center justify-between mb-2 px-1">
-                                        <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Recent ({Math.min(threads.length, 5)})</h5>
-                                        <button className="text-[10px] text-blue-600 font-medium hover:text-blue-700 transition-colors">
-                                            View all history →
-                                        </button>
-                                    </div>
-                                    <div className="space-y-3">
-                                        {threads.slice(0, 5).map(thread => (
-                                            <div 
-                                                key={thread.id}
-                                                onClick={() => { setActiveThreadId(thread.id); setView("chat"); }}
-                                                className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
-                                            >
-                                                <div className="flex items-center justify-between mb-1">
-                                                    <div className="flex items-center gap-2">
-                                                        {thread.type === 'overview' && <TrendingUp className="w-3.5 h-3.5 text-blue-500" />}
-                                                        {thread.type === 'issue' && <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
-                                                        {thread.type === 'general' && <MessageSquare className="w-3.5 h-3.5 text-slate-400" />}
-                                                        <span className={`font-semibold text-sm ${thread.type === 'overview' ? 'text-blue-900' : 'text-slate-900'}`}>
-                                                            {thread.title}
-                                                        </span>
-                                                    </div>
-                                                    <span className="text-[10px] text-slate-400">
-                                                        {thread.lastMessageAt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                                    </span>
-                                                </div>
-                                                <p className="text-xs text-slate-500 line-clamp-1 ml-5.5">
-                                                    {thread.messages[thread.messages.length-1].content.slice(0, 50)}...
-                                                </p>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
-                        <div className="overflow-visible">
-                           <SuggestionList title="Suggested Actions">
-                                <SuggestionRow 
-                                    onClick={startAnalysis} 
-                                    label="Evaluate Potential Issues" 
-                                    icon={Search}
-                                    description="Run automated validation checks"
-                                />
-                                <SuggestionRow 
-                                    onClick={() => handleSendMessage("Compare to last quarter")} 
-                                    label="Compare Quarters" 
-                                    icon={History}
-                                    description="Review trends against Q2-2025"
-                                />
-                                <SuggestionRow 
-                                    onClick={() => handleSendMessage("Why is fringe high? Please analyze.")} 
-                                    label="Analyze Fringe Benefits" 
-                                    icon={TrendingUp}
-                                    description="Investigate the 8.7% increase"
-                                />
-                            </SuggestionList>
-                        </div>
-                        <div className="relative">
-                            <input
-                                type="text"
-                                value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputValue)}
-                                placeholder="Ask anything..."
-                                className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                            />
-                            <button 
-                                onClick={() => handleSendMessage(inputValue)}
-                                disabled={!inputValue.trim()}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                            >
-                                <Send className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
-                    </div>
-                </motion.div>
-            )}
-
-            {view === "analyzing" && (
-            <motion.div 
-                key="analyzing"
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                className="absolute inset-0 flex flex-col items-center justify-center text-center p-8"
+          {view === "main" && (
+            <motion.div
+              key="main"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col flex-1 h-full"
             >
-                <div className="relative w-16 h-16 mb-6">
+              <div className="flex-1 overflow-y-auto">
+                <div className="p-4 pt-8 pb-2">
+                  <div className="flex w-full mb-6">
+                    <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
+                      <Bot className="w-3.5 h-3.5 text-blue-600" />
+                    </div>
+                    <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm text-sm text-slate-800 leading-relaxed max-w-[85%]">
+                      <p>
+                        I'm ready to help. You can ask me about the issues I
+                        found, or detailed questions about specific positions.
+                      </p>
+                    </div>
+                  </div>
+
+                  {threads.length > 0 && (
+                    <div className="mb-6">
+                      <div className="flex items-center justify-between mb-2 px-1">
+                        <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          Recent ({Math.min(threads.length, 5)})
+                        </h5>
+                        <button className="text-[10px] text-blue-600 font-medium hover:text-blue-700 transition-colors">
+                          View all history →
+                        </button>
+                      </div>
+                      <div className="space-y-3">
+                        {threads.slice(0, 5).map((thread) => (
+                          <div
+                            key={thread.id}
+                            onClick={() => {
+                              setActiveThreadId(thread.id);
+                              setView("chat");
+                            }}
+                            className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all cursor-pointer group"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                {thread.type === "overview" && (
+                                  <TrendingUp className="w-3.5 h-3.5 text-blue-500" />
+                                )}
+                                {thread.type === "issue" && (
+                                  <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                                )}
+                                {thread.type === "general" && (
+                                  <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+                                )}
+                                <span
+                                  className={`font-semibold text-sm ${thread.type === "overview" ? "text-blue-900" : "text-slate-900"}`}
+                                >
+                                  {thread.title}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400">
+                                {thread.lastMessageAt.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 line-clamp-1 ml-5.5">
+                              {thread.messages[thread.messages.length - 1]
+                                .isLocalComponent
+                                ? "Issues overview"
+                                : thread.messages[
+                                    thread.messages.length - 1
+                                  ].content.slice(0, 50)}
+                              ...
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
+                <div className="overflow-visible">
+                  <SuggestedActions
+                    onFeatureSelect={handleFeatureSelect}
+                    context={{
+                      reportId: sessionContext.reportId,
+                      user: sessionContext.user,
+                      view: view,
+                    }}
+                  />
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleSendMessage(inputValue)
+                    }
+                    placeholder="Ask anything..."
+                    className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  />
+                  <button
+                    onClick={() => handleSendMessage(inputValue)}
+                    disabled={!inputValue.trim()}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {view === "analyzing" && (
+            <motion.div
+              key="analyzing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 flex flex-col items-center justify-center text-center p-8"
+            >
+              <div className="relative w-16 h-16 mb-6">
                 <div className="absolute inset-0 rounded-full border-4 border-blue-100"></div>
                 <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin"></div>
                 <Bot className="absolute inset-0 m-auto w-6 h-6 text-blue-500" />
-                </div>
-                <h4 className="font-semibold text-slate-900 mb-2">Analyzing Cost Data...</h4>
-                <p className="text-sm text-slate-500">Checking against 43 validation rules and historical patterns.</p>
+              </div>
+              <h4 className="font-semibold text-slate-900 mb-2">
+                Analyzing Cost Data...
+              </h4>
+              <p className="text-sm text-slate-500">
+                Checking against 43 validation rules and historical patterns.
+              </p>
             </motion.div>
-            )}
+          )}
 
-            {view === "chat" && activeThread && (
+          {view === "chat" && activeThread && (
             <motion.div
-                key="chat"
-                initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 20, opacity: 0 }}
-                className="flex flex-col flex-1 h-full overflow-hidden"
+              key="chat"
+              initial={{ x: 20, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 20, opacity: 0 }}
+              className="flex flex-col flex-1 h-full overflow-hidden"
             >
-                <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth">
-                    {activeThread.messages.map((msg) => (
-                        <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} ${msg.type === 'summary_component' ? 'w-full' : ''}`}>
-                            {msg.role === 'ai' && msg.type !== 'summary_component' && (
-                                <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
-                                    <Bot className="w-3.5 h-3.5 text-blue-600" />
-                                </div>
-                            )}
-                            
-                            {msg.type === 'summary_component' ? (
-                                <SummaryComponent onCreateIssueThread={createIssueThread} onStartChat={() => createGeneralThread()} />
-                            ) : (
-                                <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm group/msg relative ${
-                                    msg.role === 'user' 
-                                    ? 'bg-blue-600 text-white rounded-br-none' 
-                                    : 'bg-white text-slate-800 border border-slate-100 rounded-bl-none'
-                                }`}>
-                                    {msg.type === 'comparison' ? (
-                                        <ComparisonCard onDraftFeedback={() => handleSendMessage("Draft sendback for issues")} />
-                                    ) : msg.type === 'fringe_analysis' ? (
-                                        <FringeAnalysisCard />
-                                    ) : (
-                                        msg.type === 'feedback_draft' ? (
-                                            (() => {
-                                                const feedback = extractFeedbackText(msg.content);
-                                                const intro = msg.content.replace(`"${feedback}"`, '').trim();
-                                                
-                                                return (
-                                                    <div className="flex flex-col gap-2">
-                                                        {intro && <FormattedMessage content={intro} />}
-                                                        <div className="relative bg-blue-50/50 border border-blue-100 rounded-lg p-3 pr-8">
-                                                            <p className="whitespace-pre-wrap font-medium text-slate-700 text-xs italic">"{feedback}"</p>
-                                                            <div className="absolute top-2 right-2">
-                                                                <CopyButton text={feedback} />
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })()
-                                        ) : (
-                                            <>
-                                                <FormattedMessage content={msg.content} />
-                                                {msg.type === 'issue_init' && (
-                                                    <div className="mt-3 pt-3 border-t border-slate-100">
-                                                        <button 
-                                                            onClick={() => handleSendMessage("Generate feedback draft")}
-                                                            className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center gap-2 border border-blue-200"
-                                                        >
-                                                            <Sparkles className="w-3.5 h-3.5" />
-                                                            Generate Feedback
-                                                        </button>
-                                                    </div>
-                                                )}
-                                            </>
-                                        )
-                                    )}
-                                </div>
-                            )}
+              <div
+                ref={scrollRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4 scroll-smooth"
+              >
+                {activeThread.messages.map((msg) => {
+                  // Hide empty streaming messages (typing indicator shows instead)
+                  const isEmptyStreamingMessage = msg.id === streamingMessageId && !msg.content?.trim();
+                  if (isEmptyStreamingMessage) return null;
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} ${msg.isLocalComponent ? "w-full" : ""}`}
+                    >
+                      {msg.role === "ai" && !msg.isLocalComponent && (
+                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1 shrink-0">
+                          <Bot className="w-3.5 h-3.5 text-blue-600" />
                         </div>
-                    ))}
-                    {isTyping && (
-                        <div className="flex justify-start">
-                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1">
-                            <Bot className="w-3.5 h-3.5 text-blue-600" />
-                        </div>
-                        <div className="bg-white border border-slate-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
-                            <div className="flex gap-1">
-                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                            <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                            </div>
-                        </div>
-                        </div>
-                    )}
-                </div>
-                
-                {/* Input Area */}
-                <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-                    <div className="relative">
-                        <input
-                        type="text"
-                        value={inputValue}
-                        onChange={(e) => setInputValue(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(inputValue)}
-                        placeholder="Ask anything..."
-                        className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                      )}
+
+                      {msg.isLocalComponent === "summary" ? (
+                        <SummaryComponent
+                          onCreateIssueThread={createIssueThread}
                         />
-                        <button 
-                        onClick={() => handleSendMessage(inputValue)}
-                        disabled={!inputValue.trim()}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      ) : (
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                            msg.role === "user"
+                              ? "bg-blue-600 text-white rounded-br-none"
+                              : "bg-white text-slate-800 border border-slate-100 rounded-bl-none"
+                          }`}
                         >
-                        <Send className="w-3.5 h-3.5" />
-                        </button>
+                          {msg.role === "user" ? (
+                            msg.content
+                          ) : (
+                            <MessageRenderer content={msg.content} isStreaming={msg.id === streamingMessageId} />
+                          )}
+                        </div>
+                      )}
                     </div>
+                  );
+                })}
+                {isTyping && (
+                  <div className="flex justify-start">
+                    <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center mr-2 mt-1">
+                      <Bot className="w-3.5 h-3.5 text-blue-600" />
+                    </div>
+                    <div className="bg-white border border-slate-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
+                      <div className="flex gap-1">
+                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Input Area */}
+              <div className="p-3 bg-white border-t border-slate-100 shrink-0">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleSendMessage(inputValue)
+                    }
+                    placeholder="Ask anything..."
+                    className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                  />
+                  <button
+                    onClick={() => handleSendMessage(inputValue)}
+                    disabled={!inputValue.trim()}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
                 </div>
+              </div>
             </motion.div>
-            )}
+          )}
         </AnimatePresence>
       </div>
     </div>
   );
 }
 
-function extractFeedbackText(content: string) {
-    const match = content.match(/"([^"]+)"/);
-    return match ? match[1] : content;
-}
-
-function CopyButton({ text }: { text: string }) {
-    const [copied, setCopied] = useState(false);
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
-
-    return (
-        <button 
-            onClick={handleCopy}
-            className="p-1.5 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
-            title="Copy feedback"
-        >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5 text-slate-400" />}
-        </button>
-    );
-}
-
-// Format text with bold support
-function FormattedMessage({ content }: { content: string }) {
-    // Split by **text**
-    const parts = content.split(/(\*\*[^*]+\*\*)/g);
-    
-    return (
-        <p className="whitespace-pre-wrap">
-            {parts.map((part, index) => {
-                if (part.startsWith('**') && part.endsWith('**')) {
-                    return <strong key={index} className="font-bold text-slate-900">{part.slice(2, -2)}</strong>;
-                }
-                return <span key={index}>{part}</span>;
-            })}
+/** Local summary component showing mock issues */
+function SummaryComponent({
+  onCreateIssueThread,
+}: {
+  onCreateIssueThread: (issue: (typeof MOCK_ISSUES)[0]) => void;
+}) {
+  return (
+    <div className="space-y-4 w-full">
+      <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+        <p className="text-sm text-blue-900">
+          Hi there! I've reviewed <strong>{REPORT_DATA.districtName}</strong>{" "}
+          and found{" "}
+          <strong className="text-blue-700">3 potential issues</strong> that
+          require attention.
         </p>
-    );
-}
-
-// Extracted Summary Component for the Overview Thread
-function SummaryComponent({ onCreateIssueThread, onStartChat }: { onCreateIssueThread: (issue: any) => void, onStartChat: (msg?: string) => void }) {
-    return (
-        <div className="space-y-4 w-full">
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                <p className="text-sm text-blue-900">
-                    Hi there! I've reviewed <strong>{REPORT_DATA.districtName}</strong> and found <strong className="text-blue-700">3 potential issues</strong> that require attention.
-                </p>
-            </div>
-
-            <div className="space-y-3">
-                <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">Detected Issues</h5>
-                {MOCK_ISSUES.map((issue) => (
-                    <div 
-                        key={issue.id} 
-                        onClick={() => onCreateIssueThread(issue)}
-                        className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group cursor-pointer"
-                    >
-                        <div className="flex items-start gap-3">
-                            <div className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
-                                issue.priority === 'high' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
-                            }`}>
-                                <AlertTriangle className="w-3 h-3" />
-                            </div>
-                            <div>
-                                <h6 className="text-sm font-semibold text-slate-900 group-hover:text-blue-700 transition-colors">{issue.title}</h6>
-                                <p className="text-xs text-slate-500 mt-1 leading-relaxed">{issue.description}</p>
-                                {issue.amount !== null && (
-                                    <div className="mt-2 text-xs font-mono font-medium text-slate-700 bg-slate-50 inline-block px-1.5 py-0.5 rounded border border-slate-100">
-                                    Impact: ${issue.amount.toLocaleString()}
-                                    </div>
-                                )}
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-400 transition-colors" />
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </div>
-    );
-}
-
-function SuggestionList({ title, children }: { title: string, children: React.ReactNode }) {
-  const [isExpanded, setIsExpanded] = useState(true);
-
-  return (
-    <div className="mb-0 px-1">
-      <button 
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 group"
-      >
-        <div className="flex items-center gap-1.5">
-            <Sparkles className="w-3 h-3 text-blue-400" />
-            {title}
-        </div>
-        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-      </button>
-      <AnimatePresence>
-        {isExpanded && (
-            <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="flex flex-col gap-2 overflow-hidden"
-            >
-                {children}
-            </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-function SuggestionRow({ onClick, label, icon: Icon, description }: { onClick: () => void, label: string, icon: any, description?: string }) {
-  return (
-    <button 
-      onClick={onClick}
-      className="w-full flex items-center gap-3 p-2.5 bg-white border border-slate-200 rounded-xl text-left hover:border-blue-300 hover:shadow-md hover:bg-blue-50/30 transition-all group"
-    >
-      <div className="w-7 h-7 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 group-hover:bg-blue-100 group-hover:border-blue-200 group-hover:text-blue-600 transition-colors">
-        <Icon className="w-3.5 h-3.5 text-slate-500 group-hover:text-blue-600" />
       </div>
-      <div className="min-w-0">
-        <div className="text-xs font-semibold text-slate-700 group-hover:text-blue-800 truncate">{label}</div>
-        {description && <div className="text-[10px] text-slate-400 group-hover:text-blue-600/70 truncate">{description}</div>}
-      </div>
-      <ChevronRight className="w-3.5 h-3.5 text-slate-300 ml-auto group-hover:text-blue-400" />
-    </button>
-  );
-}
 
-function SuggestionPill({ onClick, label, icon: Icon }: { onClick: () => void, label: string, icon: any }) {
-  return (
-    <button 
-      onClick={onClick}
-      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-full text-xs font-medium text-slate-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors whitespace-nowrap shrink-0"
-    >
-      <Icon className="w-3 h-3" />
-      {label}
-    </button>
-  );
-}
-
-function ComparisonCard({ onDraftFeedback }: { onDraftFeedback: () => void }) {
-  return (
-    <div className="w-full space-y-4">
-      <p className="text-sm font-medium text-slate-800 mb-2">Comparing Q3-2025 to Q3-2024:</p>
-      
       <div className="space-y-3">
-        <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-          <div className="flex justify-between items-center mb-1">
-             <span className="text-xs text-slate-500 uppercase font-semibold">Personnel</span>
-             <span className="text-xs font-bold text-emerald-600">+2 positions (↑ 12.5%)</span>
+        <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
+          Detected Issues
+        </h5>
+        {MOCK_ISSUES.map((issue) => (
+          <div
+            key={issue.id}
+            onClick={() => onCreateIssueThread(issue)}
+            className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group cursor-pointer"
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                  issue.priority === "high"
+                    ? "bg-red-100 text-red-600"
+                    : "bg-amber-100 text-amber-600"
+                }`}
+              >
+                <AlertTriangle className="w-3 h-3" />
+              </div>
+              <div>
+                <h6 className="text-sm font-semibold text-slate-900 group-hover:text-blue-700 transition-colors">
+                  {issue.title}
+                </h6>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {issue.description}
+                </p>
+                {issue.amount !== null && (
+                  <div className="mt-2 text-xs font-mono font-medium text-slate-700 bg-slate-50 inline-block px-1.5 py-0.5 rounded border border-slate-100">
+                    Impact: ${issue.amount.toLocaleString()}
+                  </div>
+                )}
+              </div>
+              <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-400 transition-colors" />
+            </div>
           </div>
-          <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
-             <div className="bg-emerald-500 h-full w-[85%]"></div>
-          </div>
-        </div>
-
-        <div className="bg-amber-50 p-2.5 rounded-lg border border-amber-100">
-          <div className="flex justify-between items-center mb-1">
-             <span className="text-xs text-amber-800 uppercase font-semibold">Salary Diff</span>
-             <span className="text-xs font-bold text-amber-700">+$26,480 (↑ 12.3%)</span>
-          </div>
-           <div className="flex items-center gap-1.5 text-[10px] text-amber-700 mt-1">
-             <AlertTriangle className="w-3 h-3" />
-             Requires justification ({'>'}5%)
-           </div>
-        </div>
-
-        <div className="bg-amber-50 p-2.5 rounded-lg border border-amber-100">
-          <div className="flex justify-between items-center mb-1">
-             <span className="text-xs text-amber-800 uppercase font-semibold">Fringe Diff</span>
-             <span className="text-xs font-bold text-amber-700">+$5,098 (↑ 8.7%)</span>
-          </div>
-           <div className="flex items-center gap-1.5 text-[10px] text-amber-700 mt-1">
-             <AlertTriangle className="w-3 h-3" />
-             Requires justification
-           </div>
-        </div>
-
-         <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-          <div className="text-xs text-slate-500 uppercase font-semibold mb-2">New Positions</div>
-          <ul className="space-y-1.5">
-            <li className="flex items-center justify-between text-xs">
-              <span className="text-slate-700">Williams (Alt Ed)</span>
-              <span className="font-mono text-slate-600">$10,268</span>
-            </li>
-            <li className="flex items-center justify-between text-xs">
-              <span className="text-slate-700">Lee (Alt Svcs)</span>
-              <span className="font-mono text-slate-600">$9,212</span>
-            </li>
-          </ul>
-        </div>
+        ))}
       </div>
-      
-      <button 
-        onClick={onDraftFeedback}
-        className="w-full py-2 bg-blue-50 text-blue-600 rounded-lg text-xs font-medium hover:bg-blue-100 hover:text-blue-700 transition-colors flex items-center justify-center gap-2 border border-blue-200"
-      >
-        <Sparkles className="w-3.5 h-3.5" />
-        Draft Feedback
-      </button>
     </div>
   );
-}
-
-function FringeAnalysisCard() {
-    return (
-        <div className="w-full space-y-3">
-            <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
-                 <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs text-amber-800 uppercase font-semibold">Fringe Rate Increase</span>
-                    <span className="text-xs font-bold text-amber-700">↑ 8.7%</span>
-                 </div>
-                 <p className="text-xs text-amber-700 mt-1">
-                    Exceeds the 5% threshold, triggering validation.
-                 </p>
-            </div>
-            
-            <div className="bg-white p-3 rounded-lg border border-slate-200">
-                <h6 className="text-xs font-semibold text-slate-700 mb-2 uppercase">Driving Factors</h6>
-                <ul className="space-y-2">
-                    <li className="flex gap-2">
-                        <div className="w-1 h-full min-h-[1.25rem] bg-blue-500 rounded-full shrink-0"></div>
-                        <div>
-                             <p className="text-xs font-medium text-slate-800">New Staff Additions</p>
-                             <p className="text-[10px] text-slate-500">Williams (Alt Ed) and Lee (Alt Svcs) added ~$7.1k in fringe costs.</p>
-                        </div>
-                    </li>
-                    <li className="flex gap-2">
-                        <div className="w-1 h-full min-h-[1.25rem] bg-blue-300 rounded-full shrink-0"></div>
-                        <div>
-                             <p className="text-xs font-medium text-slate-800">Rate Adjustments</p>
-                             <p className="text-[10px] text-slate-500">General fringe rate increased across existing staff.</p>
-                        </div>
-                    </li>
-                </ul>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <h6 className="text-xs font-semibold text-slate-700 mb-1 uppercase">Recommendation</h6>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                    The salary differential is 12.3%, so this fringe increase is proportional. However, the current justification fails to mention the new positions.
-                </p>
-            </div>
-        </div>
-    );
 }
