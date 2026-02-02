@@ -15,6 +15,48 @@ interface AgentChatRequest {
   stream?: boolean;
 }
 
+/**
+ * Issue returned from validation API
+ */
+interface ValidationIssue {
+  id: number;
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  amount: number | null;
+  category: string;
+  recordId?: number;
+}
+
+/**
+ * Validation response from Mastra
+ */
+interface ValidationResponse {
+  reportId: string;
+  districtName: string;
+  quarter: string;
+  totalRecords: number;
+  issues: ValidationIssue[];
+  summary: {
+    errorCount: number;
+    warningCount: number;
+    passedCount: number;
+    analysisTime: number;
+  };
+}
+
+/**
+ * Report info response from Mastra
+ */
+interface ReportInfoResponse {
+  reportId: string;
+  districtName: string;
+  quarter: string;
+  positions: number;
+  totalSalary: number;
+  totalFringe: number;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
@@ -115,6 +157,94 @@ export async function registerRoutes(
       return;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unable to reach Mastra agent";
+      return res.status(502).json({ error: errorMessage });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Validate Report Endpoint
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log("[routes] Registering /api/validate-report route...");
+
+  app.post("/api/validate-report", async (req: Request, res: Response) => {
+    console.log("[routes] /api/validate-report called");
+    const { reportId, forceRefresh } = req.body ?? {};
+
+    if (!reportId) {
+      return res.status(400).json({ error: "reportId is required" });
+    }
+
+    const baseUrl = (process.env.MASTRA_BASE_URL || "http://localhost:4111").replace(/\/$/, "");
+    const endpoint = `${baseUrl}/sdac/validate`;
+
+    console.log("[routes] Calling Mastra validate:", endpoint);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId, forceRefresh: forceRefresh ?? false }),
+      });
+
+      console.log("[routes] Mastra validate response status:", response.status);
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        console.log("[routes] Mastra validate error:", JSON.stringify(errorPayload));
+        return res.status(response.status).json({ 
+          error: errorPayload?.error ?? "Validation failed",
+          details: errorPayload?.details 
+        });
+      }
+
+      const data: ValidationResponse = await response.json();
+      return res.json(data);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unable to reach Mastra";
+      console.error("[routes] Validate error:", errorMessage);
+      return res.status(502).json({ error: errorMessage });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Report Info Endpoint
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log("[routes] Registering /api/report-info route...");
+
+  app.get("/api/report-info/:reportId", async (req: Request, res: Response) => {
+    const { reportId } = req.params;
+    console.log("[routes] /api/report-info called for:", reportId);
+
+    if (!reportId) {
+      return res.status(400).json({ error: "reportId is required" });
+    }
+
+    const baseUrl = (process.env.MASTRA_BASE_URL || "http://localhost:4111").replace(/\/$/, "");
+    const endpoint = `${baseUrl}/sdac/report/${reportId}`;
+
+    console.log("[routes] Calling Mastra report info:", endpoint);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      console.log("[routes] Mastra report info response status:", response.status);
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        return res.status(response.status).json({ 
+          error: errorPayload?.error ?? "Failed to get report info",
+          details: errorPayload?.details 
+        });
+      }
+
+      const data: ReportInfoResponse = await response.json();
+      return res.json(data);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unable to reach Mastra";
+      console.error("[routes] Report info error:", errorMessage);
       return res.status(502).json({ error: errorMessage });
     }
   });

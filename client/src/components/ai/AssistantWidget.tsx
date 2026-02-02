@@ -11,6 +11,8 @@ import {
   MessageSquare,
   Plus,
   RotateCcw,
+  Loader2,
+  CheckCircle,
 } from "lucide-react";
 import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
 import { useSessionContext } from "@/hooks/useSessionContext";
@@ -37,6 +39,40 @@ type Thread = {
   issueId?: number;
 };
 
+/** Active tool call being executed */
+type ActiveTool = {
+  toolCallId: string;
+  toolName: string;
+  displayName: string;
+  startTime: number;
+};
+
+/** Issue from validation API */
+type ValidationIssue = {
+  id: number;
+  priority: "high" | "medium" | "low";
+  title: string;
+  description: string;
+  amount: number | null;
+  category: string;
+  recordId?: number;
+};
+
+/** Validation result from API */
+type ValidationResult = {
+  reportId: string;
+  districtName: string;
+  quarter: string;
+  totalRecords: number;
+  issues: ValidationIssue[];
+  summary: {
+    errorCount: number;
+    warningCount: number;
+    passedCount: number;
+    analysisTime: number;
+  };
+};
+
 export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const [view, setView] = useState<ViewState>("main");
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -44,6 +80,9 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
+  const [activeTools, setActiveTools] = useState<Map<string, ActiveTool>>(new Map());
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const agentId = import.meta.env.VITE_MASTRA_AGENT_ID as string | undefined;
 
@@ -64,31 +103,91 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
   const activeThread = threads.find((t) => t.id === activeThreadId);
 
-  const startAnalysis = () => {
+  const startAnalysis = async () => {
     setView("analyzing");
+    setValidationError(null);
 
-    if (!threads.find((t) => t.id === "overview")) {
-      const overviewThread: Thread = {
-        id: "overview",
-        title: "Potential Issues Evaluation",
-        type: "overview",
-        messages: [
-          {
-            id: "summary-component",
-            role: "ai",
-            content: "",
-            isLocalComponent: "summary",
-          },
-        ],
-        lastMessageAt: new Date(),
-      };
-      setThreads((prev) => [overviewThread, ...prev]);
-    }
+    try {
+      // Fetch real validation data from Mastra
+      const response = await fetch("/api/validate-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId: sessionContext.reportId }),
+      });
 
-    setTimeout(() => {
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Validation failed" }));
+        throw new Error(error.error || "Validation failed");
+      }
+
+      const result: ValidationResult = await response.json();
+      setValidationResult(result);
+
+      // Create overview thread with real data
+      if (!threads.find((t) => t.id === "overview")) {
+        const overviewThread: Thread = {
+          id: "overview",
+          title: "Potential Issues Evaluation",
+          type: "overview",
+          messages: [
+            {
+              id: "summary-component",
+              role: "ai",
+              content: "",
+              isLocalComponent: "summary",
+            },
+          ],
+          lastMessageAt: new Date(),
+        };
+        setThreads((prev) => [overviewThread, ...prev]);
+      }
+
       setView("chat");
       setActiveThreadId("overview");
-    }, 2000);
+    } catch (error) {
+      console.error("[AssistantWidget] Validation error:", error);
+      setValidationError(error instanceof Error ? error.message : "Validation failed");
+      
+      // Fall back to mock data on error
+      setValidationResult({
+        reportId: sessionContext.reportId,
+        districtName: REPORT_DATA.districtName,
+        quarter: REPORT_DATA.quarter,
+        totalRecords: REPORT_DATA.positions,
+        issues: MOCK_ISSUES.map((issue) => ({
+          ...issue,
+          priority: issue.priority as "high" | "medium" | "low",
+          category: "MOCK",
+        })),
+        summary: {
+          errorCount: MOCK_ISSUES.filter((i) => i.priority === "high").length,
+          warningCount: MOCK_ISSUES.filter((i) => i.priority === "medium").length,
+          passedCount: 5,
+          analysisTime: 0,
+        },
+      });
+
+      if (!threads.find((t) => t.id === "overview")) {
+        const overviewThread: Thread = {
+          id: "overview",
+          title: "Potential Issues Evaluation",
+          type: "overview",
+          messages: [
+            {
+              id: "summary-component",
+              role: "ai",
+              content: "",
+              isLocalComponent: "summary",
+            },
+          ],
+          lastMessageAt: new Date(),
+        };
+        setThreads((prev) => [overviewThread, ...prev]);
+      }
+
+      setView("chat");
+      setActiveThreadId("overview");
+    }
   };
 
   const handleBackToMain = () => {
@@ -96,7 +195,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     setActiveThreadId(null);
   };
 
-  const createIssueThread = (issue: (typeof MOCK_ISSUES)[0]) => {
+  const createIssueThread = (issue: ValidationIssue) => {
     const existing = threads.find((t) => t.issueId === issue.id);
     if (existing) {
       setActiveThreadId(existing.id);
@@ -104,13 +203,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       return;
     }
 
-    // Create JSON response for issue init
-    const initContent = JSON.stringify({
-      type: "text",
-      data: {
-        content: `I've opened a detailed view for **${issue.title}**.\n\n**Issue:** ${issue.description}\n**Impact:** ${issue.amount ? "$" + issue.amount.toLocaleString() : "N/A"}\n\nHow would you like to handle this? I can draft a specific comment or check historical context.`,
-      },
-    });
+    // Create text content for issue init
+    const initContent = `I've opened a detailed view for **${issue.title}**.\n\n**Issue:** ${issue.description}\n**Category:** ${issue.category}\n**Impact:** ${issue.amount ? "$" + issue.amount.toLocaleString() : "N/A"}\n\nHow would you like to handle this? I can help draft a response, check historical context, or explain the validation rule.`;
 
     const newThread: Thread = {
       id: `issue-${issue.id}`,
@@ -127,14 +221,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   };
 
   const createGeneralThread = (initialMsg?: string) => {
-    // Create JSON response for welcome message
-    const welcomeContent = JSON.stringify({
-      type: "text",
-      data: {
-        content:
-          "I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.",
-      },
-    });
+    // Plain text welcome message
+    const welcomeContent = "I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.";
 
     const newThread: Thread = {
       id: `general-${Date.now()}`,
@@ -173,7 +261,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     text: string,
     threadId: string,
     onDelta?: (delta: string) => void
-  ): Promise<{ content: string | null; conversationId?: string; turnNumber?: number }> => {
+  ): Promise<{ content: string | null; conversationId?: string; turnNumber?: number; error?: string }> => {
     // Simplified payload - backend manages conversation history
     const payload = {
       agentId,
@@ -193,19 +281,20 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       });
 
       if (!response.ok) {
-        return { content: null };
+        return { content: null, error: `Request failed: ${response.status}` };
       }
 
       const contentType = response.headers.get("content-type") || "";
       if (contentType.includes("text/event-stream")) {
         const reader = response.body?.getReader();
-        if (!reader) return { content: null };
+        if (!reader) return { content: null, error: "No response body" };
 
         const decoder = new TextDecoder();
         let buffer = "";
         let fullText = "";
         let responseConversationId: string | undefined;
         let responseTurnNumber: number | undefined;
+        let errorMessage: string | undefined;
 
         while (true) {
           const { value, done } = await reader.read();
@@ -250,9 +339,38 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   }
                   break;
 
+                case "tool-start":
+                  // Tool execution started
+                  setActiveTools(prev => {
+                    const next = new Map(prev);
+                    next.set(json.toolCallId, {
+                      toolCallId: json.toolCallId,
+                      toolName: json.toolName,
+                      displayName: json.displayName,
+                      startTime: Date.now(),
+                    });
+                    return next;
+                  });
+                  break;
+
+                case "tool-result":
+                  // Tool execution completed
+                  setActiveTools(prev => {
+                    const next = new Map(prev);
+                    next.delete(json.toolCallId);
+                    return next;
+                  });
+                  break;
+
+                case "error":
+                  // Error from server
+                  errorMessage = json.message || "An error occurred";
+                  break;
+
                 case "usage":
                 case "done":
-                  // Optional: could log usage or handle completion
+                  // Clear any remaining tool indicators
+                  setActiveTools(new Map());
                   break;
 
                 default:
@@ -283,6 +401,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           content: fullText || null,
           conversationId: responseConversationId,
           turnNumber: responseTurnNumber,
+          error: errorMessage,
         };
       }
 
@@ -295,8 +414,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         conversationId: raw?.conversationId,
         turnNumber: raw?.turnNumber,
       };
-    } catch {
-      return { content: null };
+    } catch (e) {
+      return { content: null, error: e instanceof Error ? e.message : "Request failed" };
     }
   };
 
@@ -435,19 +554,20 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         setConversationId(agentReply.conversationId);
       }
     } else {
-      // Return error as JSON
+      // Return error message - show actual error if available
+      const errorContent = agentReply.error
+        ? `Sorry, something went wrong: ${agentReply.error}`
+        : "Sorry, I'm unable to process your request at the moment. Please try again later.";
+      
       responseMsg = {
         id: streamMessageId,
         role: "ai",
-        content: JSON.stringify({
-          type: "text",
-          data: {
-            content:
-              "Sorry, I'm unable to process your request at the moment. Please try again later.",
-          },
-        }),
+        content: errorContent,
       };
     }
+
+    // Clear tool indicators
+    setActiveTools(new Map());
 
     setIsTyping(false);
     setStreamingMessageId(null);
@@ -719,6 +839,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
                       {msg.isLocalComponent === "summary" ? (
                         <SummaryComponent
+                          validationResult={validationResult}
+                          validationError={validationError}
                           onCreateIssueThread={createIssueThread}
                         />
                       ) : (
@@ -745,11 +867,22 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                       <Bot className="w-3.5 h-3.5 text-blue-600" />
                     </div>
                     <div className="bg-white border border-slate-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
-                      <div className="flex gap-1">
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                        <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
-                      </div>
+                      {activeTools.size > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {Array.from(activeTools.values()).map((tool) => (
+                            <div key={tool.toolCallId} className="flex items-center gap-2 text-sm text-slate-600">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                              <span>{tool.displayName}...</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex gap-1">
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -785,61 +918,134 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   );
 }
 
-/** Local summary component showing mock issues */
+/** Local summary component showing validation issues */
 function SummaryComponent({
+  validationResult,
+  validationError,
   onCreateIssueThread,
 }: {
-  onCreateIssueThread: (issue: (typeof MOCK_ISSUES)[0]) => void;
+  validationResult: ValidationResult | null;
+  validationError: string | null;
+  onCreateIssueThread: (issue: ValidationIssue) => void;
 }) {
+  // Show loading state if no result yet
+  if (!validationResult) {
+    return (
+      <div className="space-y-4 w-full">
+        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span>Loading validation results...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const issueCount = validationResult.issues.length;
+  const highPriorityCount = validationResult.issues.filter((i) => i.priority === "high").length;
+
   return (
     <div className="space-y-4 w-full">
-      <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-        <p className="text-sm text-blue-900">
-          Hi there! I've reviewed <strong>{REPORT_DATA.districtName}</strong>{" "}
-          and found{" "}
-          <strong className="text-blue-700">3 potential issues</strong> that
-          require attention.
-        </p>
+      {/* Error banner if validation had issues */}
+      {validationError && (
+        <div className="bg-amber-50 p-3 rounded-xl border border-amber-200">
+          <p className="text-xs text-amber-800">
+            <strong>Note:</strong> Could not connect to validation service. Showing cached/mock data.
+          </p>
+        </div>
+      )}
+
+      {/* Summary header */}
+      <div className={`p-4 rounded-xl border ${
+        issueCount === 0 
+          ? "bg-green-50 border-green-100" 
+          : "bg-blue-50 border-blue-100"
+      }`}>
+        {issueCount === 0 ? (
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <p className="text-sm text-green-900">
+              Great news! <strong>{validationResult.districtName}</strong> passed all validation checks.
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-blue-900">
+            I've reviewed <strong>{validationResult.districtName}</strong> ({validationResult.quarter}) and found{" "}
+            <strong className="text-blue-700">
+              {issueCount} potential issue{issueCount !== 1 ? "s" : ""}
+            </strong>
+            {highPriorityCount > 0 && (
+              <span className="text-red-600"> ({highPriorityCount} high priority)</span>
+            )}{" "}
+            that may require attention.
+          </p>
+        )}
       </div>
 
-      <div className="space-y-3">
-        <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
-          Detected Issues
-        </h5>
-        {MOCK_ISSUES.map((issue) => (
-          <div
-            key={issue.id}
-            onClick={() => onCreateIssueThread(issue)}
-            className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group cursor-pointer"
-          >
-            <div className="flex items-start gap-3">
-              <div
-                className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
-                  issue.priority === "high"
-                    ? "bg-red-100 text-red-600"
-                    : "bg-amber-100 text-amber-600"
-                }`}
-              >
-                <AlertTriangle className="w-3 h-3" />
-              </div>
-              <div>
-                <h6 className="text-sm font-semibold text-slate-900 group-hover:text-blue-700 transition-colors">
-                  {issue.title}
-                </h6>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  {issue.description}
-                </p>
-                {issue.amount !== null && (
-                  <div className="mt-2 text-xs font-mono font-medium text-slate-700 bg-slate-50 inline-block px-1.5 py-0.5 rounded border border-slate-100">
-                    Impact: ${issue.amount.toLocaleString()}
+      {/* Analysis summary stats */}
+      {validationResult.summary && (
+        <div className="flex gap-2 text-xs">
+          <span className="px-2 py-1 bg-red-50 text-red-700 rounded-lg border border-red-100">
+            {validationResult.summary.errorCount} errors
+          </span>
+          <span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg border border-amber-100">
+            {validationResult.summary.warningCount} warnings
+          </span>
+          <span className="px-2 py-1 bg-green-50 text-green-700 rounded-lg border border-green-100">
+            {validationResult.summary.passedCount} passed
+          </span>
+        </div>
+      )}
+
+      {/* Issues list */}
+      {issueCount > 0 && (
+        <div className="space-y-3">
+          <h5 className="text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
+            Detected Issues ({issueCount})
+          </h5>
+          {validationResult.issues.map((issue) => (
+            <div
+              key={issue.id}
+              onClick={() => onCreateIssueThread(issue)}
+              className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 hover:shadow-md transition-all group cursor-pointer"
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                    issue.priority === "high"
+                      ? "bg-red-100 text-red-600"
+                      : issue.priority === "medium"
+                        ? "bg-amber-100 text-amber-600"
+                        : "bg-blue-100 text-blue-600"
+                  }`}
+                >
+                  <AlertTriangle className="w-3 h-3" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h6 className="text-sm font-semibold text-slate-900 group-hover:text-blue-700 transition-colors truncate">
+                    {issue.title}
+                  </h6>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-2">
+                    {issue.description}
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                      {issue.category}
+                    </span>
+                    {issue.amount !== null && (
+                      <span className="text-xs font-mono font-medium text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                        ${issue.amount.toLocaleString()}
+                      </span>
+                    )}
                   </div>
-                )}
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-400 transition-colors shrink-0" />
               </div>
-              <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-400 transition-colors" />
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

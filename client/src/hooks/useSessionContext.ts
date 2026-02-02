@@ -3,7 +3,11 @@
  *
  * Manages session context with conversation persistence.
  * - sessionId: persists for browser tab lifetime (sessionStorage)
- * - conversationId: persists per report (localStorage), null for new conversations
+ * - conversationId: persists per report for tab lifetime (sessionStorage), null for new conversations
+ *
+ * Note: Conversation IDs are now tab-scoped (sessionStorage) rather than persistent (localStorage).
+ * This ensures fresh conversations on new browser sessions and avoids stale conversation loads.
+ * Mastra owns the conversation ID - we just store what it returns.
  */
 
 import { useMemo, useState, useCallback } from "react";
@@ -27,20 +31,22 @@ function getOrCreateSessionId(): string {
 }
 
 /**
- * Get conversation ID for a specific report
+ * Get conversation ID for a specific report (tab-scoped)
  * Returns null if no conversation exists (new conversation)
  */
 function getConversationId(reportId: string): string | null {
   if (!reportId) return null;
-  return localStorage.getItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
+  // Use sessionStorage for tab-scoped persistence (not localStorage)
+  return sessionStorage.getItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
 }
 
 /**
- * Save conversation ID for a specific report
+ * Save conversation ID for a specific report (tab-scoped)
  */
 function saveConversationId(reportId: string, conversationId: string): void {
   if (!reportId || !conversationId) return;
-  localStorage.setItem(`${CONVERSATION_KEY_PREFIX}${reportId}`, conversationId);
+  // Use sessionStorage for tab-scoped persistence (not localStorage)
+  sessionStorage.setItem(`${CONVERSATION_KEY_PREFIX}${reportId}`, conversationId);
 }
 
 /**
@@ -48,7 +54,7 @@ function saveConversationId(reportId: string, conversationId: string): void {
  */
 function clearConversationId(reportId: string): void {
   if (!reportId) return;
-  localStorage.removeItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
+  sessionStorage.removeItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
 }
 
 interface UseSessionContextOptions {
