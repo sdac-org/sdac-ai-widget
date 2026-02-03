@@ -13,8 +13,11 @@ import {
   RotateCcw,
   Loader2,
   CheckCircle,
+  UploadCloud,
+  FileText,
 } from "lucide-react";
 import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
+import { uploadIngestionFile } from "@/lib/ingestion-api";
 import { useSessionContext } from "@/hooks/useSessionContext";
 import { SuggestedActions } from "./components/SuggestedActions";
 import { MessageRenderer } from "@/renderers";
@@ -83,8 +86,124 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const [activeTools, setActiveTools] = useState<Map<string, ActiveTool>>(new Map());
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const agentId = import.meta.env.VITE_MASTRA_AGENT_ID as string | undefined;
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+
+    const file = files[0];
+    
+    // Ensure we have an active thread to report to
+    let targetThreadId = activeThreadId;
+    if (!targetThreadId) {
+      if (view === "main") {
+        createGeneralThread();
+        // We need to wait for state update or find the new thread ID. 
+        // For simplicity in this async handler, let's just use the ID we know we'd create or default to "general"
+        // Actually, createGeneralThread updates state. We might need to duplicate that logic locally or 
+        // just handle the upload and let the user see the result in the new thread.
+        // A better approach: Just switch view to chat and create a temporary thread if needed.
+        const newThreadId = `general-${Date.now()}`;
+         const newThread: Thread = {
+          id: newThreadId,
+          title: "File Upload",
+          type: "general",
+          lastMessageAt: new Date(),
+          messages: [{ id: "welcome", role: "ai", content: "I'm processing your file upload..." }],
+        };
+        setThreads((prev) => [newThread, ...prev]);
+        setActiveThreadId(newThreadId);
+        setView("chat");
+        targetThreadId = newThreadId;
+      }
+    }
+
+    if (!targetThreadId) return;
+
+    // Show uploading message
+    const uploadMsgId = Date.now().toString();
+    const uploadMsg: Message = {
+      id: uploadMsgId,
+      role: "user",
+      content: `Uploading file: ${file.name}...`,
+    };
+
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.id === targetThreadId) {
+          return {
+            ...t,
+            messages: [...t.messages, uploadMsg],
+            lastMessageAt: new Date(),
+          };
+        }
+        return t;
+      })
+    );
+
+    setIsUploading(true);
+
+    try {
+      const result = await uploadIngestionFile(file);
+      
+      const successMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "ai",
+        content: `✅ **Upload Successful**\n\nFile: ${file.name}\nJob ID: \`${result.jobId || "N/A"}\`\n\nThe file has been queued for ingestion.`,
+      };
+
+      setThreads((prev) =>
+        prev.map((t) => {
+          if (t.id === targetThreadId) {
+            return {
+              ...t,
+              messages: [...t.messages, successMsg],
+              lastMessageAt: new Date(),
+            };
+          }
+          return t;
+        })
+      );
+    } catch (error) {
+      const errorMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "ai",
+        content: `❌ **Upload Failed**\n\nError: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+
+      setThreads((prev) =>
+        prev.map((t) => {
+          if (t.id === targetThreadId) {
+            return {
+              ...t,
+              messages: [...t.messages, errorMsg],
+              lastMessageAt: new Date(),
+            };
+          }
+          return t;
+        })
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const { context: sessionContext, setConversationId, clearConversation } = useSessionContext({
     reportId: (import.meta.env.VITE_REPORT_ID as string) || "",
@@ -607,7 +726,28 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   };
 
   return (
-    <div className="w-full h-full bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col overflow-hidden">
+    <div 
+      className="w-full h-full bg-white rounded-2xl shadow-xl border border-slate-200 flex flex-col overflow-hidden relative"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag Overlay */}
+      <AnimatePresence>
+        {isDragging && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-blue-500/90 flex flex-col items-center justify-center text-white backdrop-blur-sm"
+          >
+            <UploadCloud className="w-16 h-16 mb-4 animate-bounce" />
+            <h3 className="text-2xl font-bold">Drop file to upload</h3>
+            <p className="text-blue-100 mt-2">Upload to Ingestion Server</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0 z-10">
         <div className="flex items-center gap-3">
