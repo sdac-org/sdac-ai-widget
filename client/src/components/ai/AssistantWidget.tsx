@@ -247,7 +247,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           addMessage({
             id: statusMsgId,
             role: "ai",
-            content: `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`\nExisting Report ID: \`${result.reportId || "N/A"}\`${existingInfo}\n\nThis file has been uploaded before. You have two options:\n\n**Option 1:** Use the existing report (recommended if data hasn't changed)\n**Option 2:** Re-ingest under a new ID (creates a fresh report)\n\n_The existing report has been loaded. Click "Validate Report" to analyze it, or upload the file again with "Re-ingest" to create a new report._`,
+            content: `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`${existingInfo}\n\nThis file has been uploaded before. You have two options:\n\n**Option 1:** Use the existing report (recommended if data hasn't changed)\n**Option 2:** Re-ingest under a new ID (creates a fresh report)\n\n_The existing report has been loaded. Click "Validate Report" to analyze it, or upload the file again with "Re-ingest" to create a new report._`,
           });
           
           // Store file info for potential re-ingest
@@ -261,7 +261,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           addMessage({
             id: statusMsgId,
             role: "ai",
-            content: `📋 **Report Already Exists**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId || "N/A"}\`\n\nThis file has already been uploaded. Using the existing report data. You can now run validation analysis.`,
+            content: `📋 **Report Already Exists**\n\nFile: \`${file.name}\`\n\nThis file has already been uploaded. Using the existing report data. You can now run validation analysis.`,
           });
           setIsUploading(false);
           return;
@@ -271,7 +271,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         addMessage({
           id: statusMsgId,
           role: "ai",
-          content: `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId || "N/A"}\`\n\n⏳ Processing... Uploading to storage and analyzing...`,
+          content: `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Processing... Uploading to storage and analyzing...`,
         });
 
         // Poll SDAC report status if we have a reportId
@@ -284,29 +284,29 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
             try {
               const status = await checkSdacReportStatus(result.reportId!);
 
-              if (status.status === "processed" || status.status === "completed") {
+              if (status.status === "processed" || status.status === "completed" || status.status === "success") {
                 updateMessage(
                   statusMsgId,
-                  `✅ **SDAC Report Ready**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId}\`\nDistrict: \`${status.district || "N/A"}\`\nQuarter: \`${status.quarter || "N/A"} ${status.year || ""}\`\nTotal Personnel: \`${status.total_personnel_count || 0}\`\n\nThe report has been successfully processed. You can now run validation analysis.`
+                  `✅ **SDAC Report Ready**\n\nFile: \`${file.name}\`\nDistrict: \`${status.district || "N/A"}\`\nQuarter: \`${status.quarter || "N/A"} ${status.year || ""}\`\nTotal Personnel: \`${status.total_personnel_count || 0}\`\n\nThe report has been successfully processed. You can now run validation analysis.`
                 );
                 return; // Stop polling
               } else if (status.status === "failed" || status.status === "error") {
                 updateMessage(
                   statusMsgId,
-                  `❌ **SDAC Processing Failed**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId}\`\nError: ${status.message || status.error || "Unknown error"}\n\nPlease check the file format and try again.`
+                  `❌ **SDAC Processing Failed**\n\nFile: \`${file.name}\`\nError: ${status.message || status.error || "Unknown error"}\n\nPlease check the file format and try again.`
                 );
                 return; // Stop polling
               } else if (status.status === "not_found") {
                 // Still processing, continue polling
                 updateMessage(
                   statusMsgId,
-                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
+                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
                 );
               } else {
                 // Other status (processing, queued, etc.)
                 updateMessage(
                   statusMsgId,
-                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId}\`\nStatus: \`${status.status}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
+                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\nStatus: \`${status.status}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
                 );
               }
 
@@ -317,7 +317,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                 // Timeout - but upload was successful, show success
                 updateMessage(
                   statusMsgId,
-                  `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId}\`\n\nThe report has been uploaded and is being processed. You can now run validation analysis.`
+                  `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded and is being processed. You can now run validation analysis.`
                 );
               }
             } catch (pollError) {
@@ -325,7 +325,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               // If polling fails, the upload was still successful
               updateMessage(
                 statusMsgId,
-                `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\nReport ID: \`${result.reportId}\`\n\nThe report has been uploaded. You can now run validation analysis.`
+                `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded. You can now run validation analysis.`
               );
             }
           };
@@ -482,7 +482,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   m.id === statusMsgId
                     ? {
                         ...m,
-                        content: `✅ **New Report Created**\n\nFile: \`${file.name}\`\nNew Report ID: \`${result.reportId}\`\n\nThe file has been re-ingested under a new report ID. Conversation history has been cleared for a fresh start. You can now run validation analysis.`,
+                        content: `✅ **New Report Created**\n\nFile: \`${file.name}\`\n\nThe file has been re-ingested as a new report. Conversation history has been cleared for a fresh start. You can now run validation analysis.`,
                       }
                     : m
                 ),
