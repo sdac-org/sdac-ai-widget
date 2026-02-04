@@ -683,14 +683,15 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     onDelta?: (delta: string) => void
   ): Promise<{ content: string | null; conversationId?: string; turnNumber?: number; error?: string }> => {
     // Simplified payload - backend manages conversation history
+    // reportId is optional - if not provided, agent will ask user to upload a report
     const payload = {
       agentId,
-      conversationId: sessionContext.conversationId,
-      reportId: sessionContext.reportId,
+      message: text,
       userId: sessionContext.user.id,
       sessionId: sessionContext.sessionId,
-      message: text,
       stream: true,
+      ...(sessionContext.conversationId && { conversationId: sessionContext.conversationId }),
+      ...(sessionContext.reportId && { reportId: sessionContext.reportId }),
     };
 
     try {

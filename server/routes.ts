@@ -12,7 +12,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 interface AgentChatRequest {
   agentId?: string;
   conversationId?: string | null;
-  reportId: string;
+  reportId?: string;  // Optional - agent will ask for report if not provided
   userId: string;
   sessionId: string;
   message: string;
@@ -99,10 +99,7 @@ export async function registerRoutes(
       return res.status(400).json({ error: "message string is required." });
     }
 
-    if (!reportId) {
-      return res.status(400).json({ error: "reportId is required." });
-    }
-
+    // reportId is optional - agent will ask user to upload a report if not provided
     // New endpoint handles session management server-side
     // Note: Custom Mastra routes are NOT under /api prefix (built-in routes like /api/agents are)
     const baseUrl = (process.env.MASTRA_BASE_URL || "http://localhost:4111").replace(/\/$/, "");
@@ -110,10 +107,10 @@ export async function registerRoutes(
 
     // Build payload for new /api/sdac/chat endpoint
     const payload = {
-      reportId,
       message,
       userId,
       sessionId,
+      ...(reportId && { reportId }),  // Only include if truthy
       ...(conversationId && { conversationId }),  // Only include if truthy
     };
 
