@@ -9,9 +9,10 @@ parameters:
 - name: deployTarget
   displayName: Deploy Target Environment
   type: string
-  default: dev
+  default: test
   values:
   - buildOnly
+  - test
   - dev
   - prod
   - all
@@ -24,6 +25,11 @@ parameters:
   - TAPServiceConnection
   - TherapyLogServiceConnection
 
+- name: useTestACR
+  displayName: Use Test ACR (devtestmastraenvacr) - TAP only
+  type: boolean
+  default: 'false'
+
 variables:
   System.Debug: true
   imageName: sdac-widget
@@ -31,7 +37,12 @@ variables:
   buildContext: $(Build.SourcesDirectory)
 
   # ---- ENV targets (update these with actual values) ----
-  # TAP Environment
+  # TAP Test Environment (uses devtestmastraenvacr)
+  WEB_APP_TEST: sdac-widget-test
+  RESOURCE_GROUP_TEST: DEV-testmastra-env-rg
+  ACR_NAME_TEST: devtestmastraenvacr
+
+  # TAP DEV/PROD Environment (uses tapcontainerregistry)
   WEB_APP_DEV: sdac-widget-dev
   RESOURCE_GROUP_DEV: DEV-SDAC-Widget
   WEB_APP_PROD: sdac-widget-prod
@@ -73,7 +84,11 @@ stages:
           set -euxo pipefail
           case "${{ parameters.serviceConnection }}" in
             "TAPServiceConnection")
-              ACR_NAME="tapcontainerregistry"
+              if [ "${{ parameters.useTestACR }}" == "True" ] || [ "${{ parameters.useTestACR }}" == "true" ]; then
+                ACR_NAME="devtestmastraenvacr"
+              else
+                ACR_NAME="tapcontainerregistry"
+              fi
               ;;
             "TherapyLogServiceConnection")
               ACR_NAME="k12containerresgistry"
@@ -150,6 +165,57 @@ stages:
         echo "##vso[task.setvariable variable=acrName;isOutput=true]$(acrName)"
       name: publish
       displayName: Publish build outputs
+
+# ======================= Deploy TEST =======================
+- stage: DeployTest
+  displayName: Deploy to TEST
+  dependsOn: BuildAndPush
+  condition: and(in('${{ parameters.deployTarget }}','test','all'), in(dependencies.BuildAndPush.result, 'Succeeded', 'SucceededWithIssues'))
+  variables:
+    ACR_LOGIN_SERVER: $[ stageDependencies.BuildAndPush.Build.outputs['publish.acrLoginServer'] ]
+    ACR_NAME:        $[ stageDependencies.BuildAndPush.Build.outputs['publish.acrName'] ]
+    BUILD_TAG:       $[ stageDependencies.BuildAndPush.Build.outputs['buildImage.buildTag'] ]
+    LATEST_DIGEST:   $[ stageDependencies.BuildAndPush.Build.outputs['buildImage.LATEST_DIGEST'] ]
+  jobs:
+  - job: DeployTest
+    steps:
+    - task: AzureCLI@2
+      displayName: Deploy test image
+      inputs:
+        azureSubscription: ${{ parameters.serviceConnection }}
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euxo pipefail
+          TARGET_ENV="test"
+          ENV_UPPER=${TARGET_ENV^^}
+          WEB_APP_VAR="WEB_APP_${ENV_UPPER}"
+          RESOURCE_GROUP_VAR="RESOURCE_GROUP_${ENV_UPPER}"
+
+          WEB_APP=${!WEB_APP_VAR:-}
+          RESOURCE_GROUP=${!RESOURCE_GROUP_VAR:-}
+          if [ -z "$WEB_APP" ] || [ -z "$RESOURCE_GROUP" ]; then
+            echo "Pipeline variables $WEB_APP_VAR and $RESOURCE_GROUP_VAR must be defined"
+            exit 1
+          fi
+
+          ACR_NAME="${ACR_NAME:?ACR_NAME not set}"
+          ACR_LOGIN_SERVER="${ACR_LOGIN_SERVER:?ACR_LOGIN_SERVER not set}"
+          LATEST_DIGEST="${LATEST_DIGEST:?LATEST_DIGEST not set}"
+
+          ENV_TAG="${TARGET_ENV}"
+
+          az acr import -n "$ACR_NAME" \
+            --source "$ACR_LOGIN_SERVER/$(imageName)@${LATEST_DIGEST}" \
+            --image "$(imageName):${ENV_TAG}" --force
+
+          az webapp config container set \
+            --name "$WEB_APP" \
+            --resource-group "$RESOURCE_GROUP" \
+            --container-image-name "$ACR_LOGIN_SERVER/$(imageName):${ENV_TAG}" \
+            --container-registry-url "https://$ACR_LOGIN_SERVER"
+
+          az webapp restart --name "$WEB_APP" --resource-group "$RESOURCE_GROUP"
 
 # ======================= Deploy DEV =======================
 - stage: DeployDev
