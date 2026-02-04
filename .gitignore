@@ -5,5 +5,12 @@ server/public
 vite.config.ts.*
 *.tar.gz
 
+# Environment files
 .env
+.env.local
+
+# Keep .env.replit committed for easy Replit setup
+# (contains only public cloud URLs, no secrets)
+!.env.replit
+
 .claude/*

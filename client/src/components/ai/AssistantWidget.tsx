@@ -247,7 +247,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           addMessage({
             id: statusMsgId,
             role: "ai",
-            content: `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`${existingInfo}\n\nThis file has been uploaded before. You have two options:\n\n**Option 1:** Use the existing report (recommended if data hasn't changed)\n**Option 2:** Re-ingest under a new ID (creates a fresh report)\n\n_The existing report has been loaded. Click "Validate Report" to analyze it, or upload the file again with "Re-ingest" to create a new report._`,
+            content: `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`${existingInfo}\n\nThis file has been uploaded before.\n\n**Option 1:** Use existing report (recommended)\n**Option 2:** Re-ingest as new report\n\nUse the button below to re-ingest, or continue chatting to use the existing report.`,
           });
           
           // Store file info for potential re-ingest
@@ -1067,7 +1067,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           >
             <div className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
               <Loader2 className="w-5 h-5 animate-spin" />
-              <span className="text-sm font-medium">Uploading file to ingestion server...</span>
+              <span className="text-sm font-medium">Uploading...</span>
             </div>
           </motion.div>
         )}
@@ -1221,36 +1221,36 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
                 {/* Re-ingest action banner when duplicate detected */}
                 {pendingReIngestFile && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="w-4 h-4 text-amber-600" />
-                      <span className="text-xs text-amber-800">
-                        <span className="font-medium">Duplicate detected:</span>{" "}
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <RefreshCw className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="text-xs text-amber-800 truncate">
+                        <span className="font-medium">Duplicate:</span>{" "}
                         {pendingReIngestFile.file.name}
                       </span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 justify-end">
                       <button
                         onClick={() => setPendingReIngestFile(null)}
-                        className="px-2 py-1 text-xs text-slate-600 hover:text-slate-800 transition-colors"
+                        className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 transition-colors"
                         disabled={isUploading}
                       >
-                        Dismiss
+                        Use Existing
                       </button>
                       <button
                         onClick={handleReIngest}
                         disabled={isUploading}
-                        className="px-3 py-1 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-1"
+                        className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap"
                       >
                         {isUploading ? (
                           <>
                             <RefreshCw className="w-3 h-3 animate-spin" />
-                            Re-ingesting...
+                            Processing...
                           </>
                         ) : (
                           <>
                             <RefreshCw className="w-3 h-3" />
-                            Re-ingest as New
+                            Re-ingest
                           </>
                         )}
                       </button>
@@ -1395,36 +1395,36 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
                 {/* Re-ingest action banner when duplicate detected (chat view) */}
                 {pendingReIngestFile && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="w-4 h-4 text-amber-600" />
-                      <span className="text-xs text-amber-800">
-                        <span className="font-medium">Duplicate detected:</span>{" "}
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <RefreshCw className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="text-xs text-amber-800 truncate">
+                        <span className="font-medium">Duplicate:</span>{" "}
                         {pendingReIngestFile.file.name}
                       </span>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 justify-end">
                       <button
                         onClick={() => setPendingReIngestFile(null)}
-                        className="px-2 py-1 text-xs text-slate-600 hover:text-slate-800 transition-colors"
+                        className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 transition-colors"
                         disabled={isUploading}
                       >
-                        Dismiss
+                        Use Existing
                       </button>
                       <button
                         onClick={handleReIngest}
                         disabled={isUploading}
-                        className="px-3 py-1 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-1"
+                        className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap"
                       >
                         {isUploading ? (
                           <>
                             <RefreshCw className="w-3 h-3 animate-spin" />
-                            Re-ingesting...
+                            Processing...
                           </>
                         ) : (
                           <>
                             <RefreshCw className="w-3 h-3" />
-                            Re-ingest as New
+                            Re-ingest
                           </>
                         )}
                       </button>
