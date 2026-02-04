@@ -15,10 +15,17 @@ import {
   CheckCircle,
   UploadCloud,
   FileText,
+  RefreshCw,
 } from "lucide-react";
 import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
-import { uploadIngestionFile } from "@/lib/ingestion-api";
-import { useSessionContext } from "@/hooks/useSessionContext";
+import {
+  uploadIngestionFile,
+  uploadSdacReport,
+  checkIngestionJobStatus,
+  checkSdacReportStatus,
+  isExcelFile
+} from "@/lib/ingestion-api";
+import { useSessionContext, saveUploadedReportId, getUploadedReportId, clearUploadedReportId, clearConversationId } from "@/hooks/useSessionContext";
 import { SuggestedActions } from "./components/SuggestedActions";
 import { MessageRenderer } from "@/renderers";
 import type { Feature } from "@/features";
@@ -88,6 +95,18 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  // Pending file for re-ingest (when duplicate detected)
+  const [pendingReIngestFile, setPendingReIngestFile] = useState<{
+    file: File;
+    userEmail: string;
+    userName: string;
+    district: string;
+  } | null>(null);
+  // Active report ID: from uploaded report (ephemeral) or from env variable (fallback)
+  const [activeReportId, setActiveReportId] = useState<string>(() => {
+    const uploadedId = getUploadedReportId();
+    return uploadedId || (import.meta.env.VITE_REPORT_ID as string) || "";
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
   const agentId = import.meta.env.VITE_MASTRA_AGENT_ID as string | undefined;
 
@@ -160,53 +179,335 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
     setIsUploading(true);
 
-    try {
-      const result = await uploadIngestionFile(file);
-      
-      const successMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: "ai",
-        content: `✅ **Upload Successful**\n\nFile: ${file.name}\nJob ID: \`${result.jobId || "N/A"}\`\n\nThe file has been queued for ingestion.`,
-      };
-
+    // Helper to add/update messages in the thread
+    const addMessage = (msg: Message) => {
       setThreads((prev) =>
         prev.map((t) => {
           if (t.id === targetThreadId) {
             return {
               ...t,
-              messages: [...t.messages, successMsg],
+              messages: [...t.messages, msg],
               lastMessageAt: new Date(),
             };
           }
           return t;
         })
       );
+    };
+
+    const updateMessage = (msgId: string, content: string) => {
+      setThreads((prev) =>
+        prev.map((t) => {
+          if (t.id === targetThreadId) {
+            return {
+              ...t,
+              messages: t.messages.map((m) =>
+                m.id === msgId ? { ...m, content } : m
+              ),
+              lastMessageAt: new Date(),
+            };
+          }
+          return t;
+        })
+      );
+    };
+
+    try {
+      const statusMsgId = (Date.now() + 1).toString();
+      const isExcel = isExcelFile(file);
+
+      if (isExcel) {
+        // Use SDAC upload for Excel files (uploads to Blob Storage)
+        // Get user info from environment (sessionContext may not be available in closure)
+        const userEmail = (import.meta.env.VITE_DEMO_USER_EMAIL as string) || "demo@example.com";
+        const userName = (import.meta.env.VITE_DEMO_USER_NAME as string) || "Demo User";
+        const district = (import.meta.env.VITE_DEMO_DISTRICT as string) || "Demo District";
+
+        console.log("[AssistantWidget] Uploading SDAC report:", file.name);
+        const result = await uploadSdacReport({
+          file,
+          userEmail,
+          userName,
+          district,
+        });
+
+        // Save the report ID for later use (ephemeral - clears on refresh)
+        if (result.reportId) {
+          saveUploadedReportId(result.reportId);
+          setActiveReportId(result.reportId);
+          console.log("[AssistantWidget] Saved uploaded report ID:", result.reportId, result.isDuplicate ? "(duplicate)" : "");
+        }
+
+        // Handle duplicate upload - file already exists, offer choice
+        if (result.isDuplicate && result.canReingest) {
+          const existingInfo = result.existingReport
+            ? `\nDistrict: \`${result.existingReport.district}\`\nQuarter: \`${result.existingReport.quarter} ${result.existingReport.year}\``
+            : "";
+          
+          addMessage({
+            id: statusMsgId,
+            role: "ai",
+            content: `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`${existingInfo}\n\nThis file has been uploaded before.\n\n**Option 1:** Use existing report (recommended)\n**Option 2:** Re-ingest as new report\n\nUse the button below to re-ingest, or continue chatting to use the existing report.`,
+          });
+          
+          // Store file info for potential re-ingest
+          setPendingReIngestFile({ file, userEmail, userName, district });
+          setIsUploading(false);
+          return; // User can choose to validate or re-upload
+        }
+        
+        // Handle simple duplicate (no re-ingest option) - backwards compatibility
+        if (result.isDuplicate) {
+          addMessage({
+            id: statusMsgId,
+            role: "ai",
+            content: `📋 **Report Already Exists**\n\nFile: \`${file.name}\`\n\nThis file has already been uploaded. Using the existing report data. You can now run validation analysis.`,
+          });
+          setIsUploading(false);
+          return;
+        }
+
+        // Initial success message with report ID
+        addMessage({
+          id: statusMsgId,
+          role: "ai",
+          content: `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Processing... Uploading to storage and analyzing...`,
+        });
+
+        // Poll SDAC report status if we have a reportId
+        if (result.reportId) {
+          let attempts = 0;
+          const maxAttempts = 60; // Poll for up to 60 seconds (SDAC processing may take longer)
+          const pollInterval = 2000; // 2 seconds
+
+          const pollStatus = async () => {
+            try {
+              const status = await checkSdacReportStatus(result.reportId!);
+
+              if (status.status === "processed" || status.status === "completed" || status.status === "success") {
+                updateMessage(
+                  statusMsgId,
+                  `✅ **SDAC Report Ready**\n\nFile: \`${file.name}\`\nDistrict: \`${status.district || "N/A"}\`\nQuarter: \`${status.quarter || "N/A"} ${status.year || ""}\`\nTotal Personnel: \`${status.total_personnel_count || 0}\`\n\nThe report has been successfully processed. You can now run validation analysis.`
+                );
+                return; // Stop polling
+              } else if (status.status === "failed" || status.status === "error") {
+                updateMessage(
+                  statusMsgId,
+                  `❌ **SDAC Processing Failed**\n\nFile: \`${file.name}\`\nError: ${status.message || status.error || "Unknown error"}\n\nPlease check the file format and try again.`
+                );
+                return; // Stop polling
+              } else if (status.status === "not_found") {
+                // Still processing, continue polling
+                updateMessage(
+                  statusMsgId,
+                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
+                );
+              } else {
+                // Other status (processing, queued, etc.)
+                updateMessage(
+                  statusMsgId,
+                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\nStatus: \`${status.status}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
+                );
+              }
+
+              attempts++;
+              if (attempts < maxAttempts) {
+                setTimeout(pollStatus, pollInterval);
+              } else {
+                // Timeout - but upload was successful, show success
+                updateMessage(
+                  statusMsgId,
+                  `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded and is being processed. You can now run validation analysis.`
+                );
+              }
+            } catch (pollError) {
+              console.error("[AssistantWidget] SDAC report status poll error:", pollError);
+              // If polling fails, the upload was still successful
+              updateMessage(
+                statusMsgId,
+                `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded. You can now run validation analysis.`
+              );
+            }
+          };
+
+          // Start polling after a brief delay
+          setTimeout(pollStatus, pollInterval);
+        } else {
+          // No reportId returned but upload succeeded
+          updateMessage(
+            statusMsgId,
+            `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded successfully.`
+          );
+        }
+      } else {
+        // Use generic ingestion for non-Excel files (local staging only)
+        console.log("[AssistantWidget] Uploading generic file:", file.name);
+        const result = await uploadIngestionFile(file);
+
+        // Initial success message with job ID
+        addMessage({
+          id: statusMsgId,
+          role: "ai",
+          content: `📤 **File Uploaded**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId || "N/A"}\`\n\n⏳ Processing... Checking ingestion status...`,
+        });
+
+        // Poll job status if we have a jobId
+        if (result.jobId) {
+          let attempts = 0;
+          const maxAttempts = 30; // Poll for up to 30 seconds
+          const pollInterval = 1000; // 1 second
+
+          const pollStatus = async () => {
+            try {
+              const status = await checkIngestionJobStatus(result.jobId!);
+
+              if (status.status === "completed") {
+                updateMessage(
+                  statusMsgId,
+                  `✅ **Upload Complete**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId}\`\nTracking ID: \`${status.tracking_id || "N/A"}\`\n\nThe file has been successfully ingested and is ready for processing.`
+                );
+                return; // Stop polling
+              } else if (status.status === "failed") {
+                updateMessage(
+                  statusMsgId,
+                  `❌ **Ingestion Failed**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId}\`\nError: ${status.error || "Unknown error"}\n\nPlease try uploading the file again.`
+                );
+                return; // Stop polling
+              } else if (status.status === "queued") {
+                updateMessage(
+                  statusMsgId,
+                  `📤 **File Uploaded**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId}\`\n\n⏳ Queued for processing... (${attempts + 1}s)`
+                );
+              }
+
+              attempts++;
+              if (attempts < maxAttempts) {
+                setTimeout(pollStatus, pollInterval);
+              } else {
+                // Timeout - show final status
+                updateMessage(
+                  statusMsgId,
+                  `📤 **File Uploaded**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId}\`\n\n✓ File has been submitted. Processing may take a while for large files.`
+                );
+              }
+            } catch (pollError) {
+              console.error("[AssistantWidget] Job status poll error:", pollError);
+              // If polling fails, just show the upload was successful
+              updateMessage(
+                statusMsgId,
+                `✅ **File Uploaded**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId}\`\n\nThe file has been queued for ingestion. Check the ingestion server for status.`
+              );
+            }
+          };
+
+          // Start polling after a brief delay
+          setTimeout(pollStatus, pollInterval);
+        }
+      }
     } catch (error) {
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "ai",
-        content: `❌ **Upload Failed**\n\nError: ${error instanceof Error ? error.message : "Unknown error"}`,
+        content: `❌ **Upload Failed**\n\nFile: \`${file.name}\`\nError: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease check your connection and try again.`,
       };
+      addMessage(errorMsg);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
+  /**
+   * Re-ingest a file that was detected as duplicate, creating a new report ID
+   */
+  const handleReIngest = async () => {
+    if (!pendingReIngestFile) {
+      console.warn("[AssistantWidget] No pending file to re-ingest");
+      return;
+    }
+
+    const { file, userEmail, userName, district } = pendingReIngestFile;
+    setPendingReIngestFile(null); // Clear pending state
+    setIsUploading(true);
+
+    // Add message to current thread
+    const activeThread = threads.find((t) => t.id === activeThreadId);
+    const addMessage = (msg: Message) => {
+      if (!activeThreadId) return;
       setThreads((prev) =>
         prev.map((t) => {
-          if (t.id === targetThreadId) {
+          if (t.id === activeThreadId) {
             return {
               ...t,
-              messages: [...t.messages, errorMsg],
+              messages: [...t.messages, msg],
               lastMessageAt: new Date(),
             };
           }
           return t;
         })
       );
+    };
+
+    try {
+      const statusMsgId = Date.now().toString();
+      addMessage({
+        id: statusMsgId,
+        role: "ai",
+        content: `🔄 **Re-ingesting File**\n\nFile: \`${file.name}\`\n\n⏳ Creating new report...`,
+      });
+
+      console.log("[AssistantWidget] Re-ingesting SDAC report:", file.name);
+      const result = await uploadSdacReport({
+        file,
+        userEmail,
+        userName,
+        district,
+        forceReIngest: true,
+      });
+
+      if (result.reportId) {
+        saveUploadedReportId(result.reportId);
+        setActiveReportId(result.reportId);
+        console.log("[AssistantWidget] Re-ingest successful, new report ID:", result.reportId);
+
+        // Clear conversation history for the new report (fresh context)
+        clearConversationId(result.reportId);
+
+        // Update message with success
+        setThreads((prev) =>
+          prev.map((t) => {
+            if (t.id === activeThreadId) {
+              return {
+                ...t,
+                messages: t.messages.map((m) =>
+                  m.id === statusMsgId
+                    ? {
+                        ...m,
+                        content: `✅ **New Report Created**\n\nFile: \`${file.name}\`\n\nThe file has been re-ingested as a new report. Conversation history has been cleared for a fresh start. You can now run validation analysis.`,
+                      }
+                    : m
+                ),
+              };
+            }
+            return t;
+          })
+        );
+      } else {
+        throw new Error("No report ID returned from re-ingest");
+      }
+    } catch (error) {
+      console.error("[AssistantWidget] Re-ingest failed:", error);
+      addMessage({
+        id: (Date.now() + 1).toString(),
+        role: "ai",
+        content: `❌ **Re-ingest Failed**\n\nFile: \`${file.name}\`\nError: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease try again.`,
+      });
     } finally {
       setIsUploading(false);
     }
   };
 
   const { context: sessionContext, setConversationId, clearConversation } = useSessionContext({
-    reportId: (import.meta.env.VITE_REPORT_ID as string) || "",
+    reportId: activeReportId,
     user: {
       id: (import.meta.env.VITE_DEMO_USER_ID as string) || "demo-user",
       name: (import.meta.env.VITE_DEMO_USER_NAME as string) || "Demo User",
@@ -382,14 +683,15 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     onDelta?: (delta: string) => void
   ): Promise<{ content: string | null; conversationId?: string; turnNumber?: number; error?: string }> => {
     // Simplified payload - backend manages conversation history
+    // reportId is optional - if not provided, agent will ask user to upload a report
     const payload = {
       agentId,
-      conversationId: sessionContext.conversationId,
-      reportId: sessionContext.reportId,
+      message: text,
       userId: sessionContext.user.id,
       sessionId: sessionContext.sessionId,
-      message: text,
       stream: true,
+      ...(sessionContext.conversationId && { conversationId: sessionContext.conversationId }),
+      ...(sessionContext.reportId && { reportId: sessionContext.reportId }),
     };
 
     try {
@@ -718,6 +1020,12 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const handleStartFresh = () => {
     // Clear backend conversation (starts new conversation with Mastra)
     clearConversation();
+    // Clear uploaded report ID and reset to default
+    clearUploadedReportId();
+    setActiveReportId((import.meta.env.VITE_REPORT_ID as string) || "");
+    // Clear validation state
+    setValidationResult(null);
+    setValidationError(null);
     // Clear all local threads
     setThreads([]);
     setActiveThreadId(null);
@@ -744,6 +1052,23 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
             <UploadCloud className="w-16 h-16 mb-4 animate-bounce" />
             <h3 className="text-2xl font-bold">Drop file to upload</h3>
             <p className="text-blue-100 mt-2">Upload to Ingestion Server</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Upload Progress Banner */}
+      <AnimatePresence>
+        {isUploading && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-16 left-0 right-0 z-40 mx-4"
+          >
+            <div className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-medium">Uploading...</span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -894,6 +1219,44 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               </div>
 
               <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
+                {/* Re-ingest action banner when duplicate detected */}
+                {pendingReIngestFile && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <RefreshCw className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="text-xs text-amber-800 truncate">
+                        <span className="font-medium">Duplicate:</span>{" "}
+                        {pendingReIngestFile.file.name}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => setPendingReIngestFile(null)}
+                        className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 transition-colors"
+                        disabled={isUploading}
+                      >
+                        Use Existing
+                      </button>
+                      <button
+                        onClick={handleReIngest}
+                        disabled={isUploading}
+                        className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap"
+                      >
+                        {isUploading ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-3 h-3" />
+                            Re-ingest
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="overflow-visible">
                   <SuggestedActions
                     onFeatureSelect={handleFeatureSelect}
@@ -1029,7 +1392,45 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               </div>
 
               {/* Input Area */}
-              <div className="p-3 bg-white border-t border-slate-100 shrink-0">
+              <div className="p-3 bg-white border-t border-slate-100 shrink-0 flex flex-col gap-3">
+                {/* Re-ingest action banner when duplicate detected (chat view) */}
+                {pendingReIngestFile && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <RefreshCw className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span className="text-xs text-amber-800 truncate">
+                        <span className="font-medium">Duplicate:</span>{" "}
+                        {pendingReIngestFile.file.name}
+                      </span>
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <button
+                        onClick={() => setPendingReIngestFile(null)}
+                        className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 transition-colors"
+                        disabled={isUploading}
+                      >
+                        Use Existing
+                      </button>
+                      <button
+                        onClick={handleReIngest}
+                        disabled={isUploading}
+                        className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded-md hover:bg-amber-700 disabled:opacity-50 transition-colors flex items-center gap-1 whitespace-nowrap"
+                      >
+                        {isUploading ? (
+                          <>
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            Processing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="w-3 h-3" />
+                            Re-ingest
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="relative">
                   <input
                     type="text"

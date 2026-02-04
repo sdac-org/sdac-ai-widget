@@ -3,9 +3,22 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { config } from "dotenv";
+import { existsSync } from "fs";
 
-// Load environment variables from .env file
-config();
+// Auto-detect environment and load appropriate .env file
+// Priority: .env.local > .env.replit (if on Replit) > .env
+const isReplit = !!process.env.REPL_ID || !!process.env.REPL_SLUG;
+
+if (existsSync(".env.local")) {
+  config({ path: ".env.local" });
+  console.log("[env] Loaded .env.local");
+} else if (isReplit && existsSync(".env.replit")) {
+  config({ path: ".env.replit" });
+  console.log("[env] Loaded .env.replit (Replit detected)");
+} else {
+  config();
+  console.log("[env] Loaded .env");
+}
 
 const app = express();
 const httpServer = createServer(app);

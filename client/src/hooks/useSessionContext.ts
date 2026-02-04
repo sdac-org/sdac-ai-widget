@@ -16,6 +16,7 @@ import { createSessionContext, type SessionContext, type UserInfo } from "@/type
 // Storage keys
 const SESSION_ID_KEY = "sdac-session-id";
 const CONVERSATION_KEY_PREFIX = "sdac-conversation-";
+const UPLOADED_REPORT_ID_KEY = "sdac-uploaded-report-id";
 
 /**
  * Get or create a browser session ID
@@ -52,9 +53,31 @@ function saveConversationId(reportId: string, conversationId: string): void {
 /**
  * Clear conversation ID for a specific report (start fresh)
  */
-function clearConversationId(reportId: string): void {
+export function clearConversationId(reportId: string): void {
   if (!reportId) return;
   sessionStorage.removeItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
+}
+
+/**
+ * Get the uploaded report ID (ephemeral, clears on refresh)
+ */
+export function getUploadedReportId(): string | null {
+  return sessionStorage.getItem(UPLOADED_REPORT_ID_KEY);
+}
+
+/**
+ * Save the uploaded report ID (ephemeral, clears on refresh)
+ */
+export function saveUploadedReportId(reportId: string): void {
+  if (!reportId) return;
+  sessionStorage.setItem(UPLOADED_REPORT_ID_KEY, reportId);
+}
+
+/**
+ * Clear the uploaded report ID
+ */
+export function clearUploadedReportId(): void {
+  sessionStorage.removeItem(UPLOADED_REPORT_ID_KEY);
 }
 
 interface UseSessionContextOptions {
