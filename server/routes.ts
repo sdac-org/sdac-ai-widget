@@ -20,6 +20,20 @@ interface AgentChatRequest {
 }
 
 /**
+ * Feedback payload from widget
+ */
+interface FeedbackRequest {
+  conversationSk: number;
+  reportId: string;
+  userId: string;
+  sessionId: string;
+  turnNumber: number;
+  rating: number;
+  category?: string;
+  comment?: string;
+}
+
+/**
  * Issue returned from validation API
  */
 interface ValidationIssue {
@@ -161,6 +175,46 @@ export async function registerRoutes(
       return res.status(502).json({ error: errorMessage });
     }
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Feedback Proxy Endpoint
+  // ─────────────────────────────────────────────────────────────────────────────
+  console.log("[routes] Registering /sdac/feedback route...");
+  console.log("[routes] Registering /api/sdac/feedback route...");
+
+  const handleFeedbackProxy = async (req: Request, res: Response) => {
+    console.log(`[routes] ${req.path} called`);
+    const payload = (req.body ?? {}) as FeedbackRequest;
+
+    const baseUrl = (process.env.MASTRA_BASE_URL || "http://localhost:4111").replace(/\/$/, "");
+    const endpoint = `${baseUrl}/sdac/feedback`;
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        return res.status(response.status).json({
+          error: errorPayload?.error ?? "Feedback request failed",
+          details: errorPayload?.details,
+        });
+      }
+
+      const data = await response.json().catch(() => ({}));
+      return res.status(200).json(data);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unable to reach Mastra";
+      console.error("[routes] Feedback proxy error:", errorMessage);
+      return res.status(502).json({ error: errorMessage });
+    }
+  };
+
+  app.post("/sdac/feedback", handleFeedbackProxy);
+  app.post("/api/sdac/feedback", handleFeedbackProxy);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Validate Report Endpoint

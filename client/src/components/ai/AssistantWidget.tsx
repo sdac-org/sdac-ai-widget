@@ -16,6 +16,8 @@ import {
   UploadCloud,
   FileText,
   RefreshCw,
+  ThumbsUp,
+  ThumbsDown,
 } from "lucide-react";
 import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
 import {
@@ -38,6 +40,28 @@ type Message = {
   content: string;
   /** Special local UI component (not from Mastra) */
   isLocalComponent?: "summary";
+  conversationSk?: number;
+  turnNumber?: number;
+  feedback?: FeedbackState;
+};
+
+const feedbackCategories = [
+  "accuracy",
+  "clarity",
+  "relevance",
+  "helpfulness",
+  "tone",
+  "other",
+] as const;
+
+type FeedbackCategory = (typeof feedbackCategories)[number];
+
+type FeedbackState = {
+  rating?: number;
+  category?: FeedbackCategory;
+  comment?: string;
+  status: "idle" | "submitting" | "submitted" | "error";
+  error?: string;
 };
 
 type Thread = {
@@ -681,7 +705,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     text: string,
     threadId: string,
     onDelta?: (delta: string) => void
-  ): Promise<{ content: string | null; conversationId?: string; turnNumber?: number; error?: string }> => {
+  ): Promise<{ content: string | null; conversationId?: string; conversationSk?: number; turnNumber?: number; error?: string }> => {
     // Simplified payload - backend manages conversation history
     // reportId is optional - if not provided, agent will ask user to upload a report
     const payload = {
@@ -714,6 +738,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         let buffer = "";
         let fullText = "";
         let responseConversationId: string | undefined;
+        let responseConversationSk: number | undefined;
         let responseTurnNumber: number | undefined;
         let errorMessage: string | undefined;
 
@@ -749,6 +774,9 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                 case "metadata":
                   // Store conversation metadata from server
                   responseConversationId = json.conversationId;
+                  if (typeof json.conversationSk === "number") {
+                    responseConversationSk = json.conversationSk;
+                  }
                   responseTurnNumber = json.turnNumber;
                   break;
 
@@ -804,6 +832,9 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   if (parsed.conversationId) {
                     responseConversationId = parsed.conversationId;
                   }
+                  if (parsed.conversationSk !== undefined) {
+                    responseConversationSk = parsed.conversationSk;
+                  }
                   if (parsed.turnNumber !== undefined) {
                     responseTurnNumber = parsed.turnNumber;
                   }
@@ -821,6 +852,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         return {
           content: fullText || null,
           conversationId: responseConversationId,
+          conversationSk: responseConversationSk,
           turnNumber: responseTurnNumber,
           error: errorMessage,
         };
@@ -833,6 +865,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       return {
         content: typeof content === "string" ? content : null,
         conversationId: raw?.conversationId,
+        conversationSk: raw?.conversationSk,
         turnNumber: raw?.turnNumber,
       };
     } catch (e) {
@@ -843,6 +876,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   const extractStreamData = (payload: string): {
     delta: string | null;
     conversationId?: string;
+    conversationSk?: number;
     turnNumber?: number;
   } => {
     try {
@@ -850,6 +884,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
       // Extract conversation metadata if present
       const conversationId = json?.conversationId;
+      const conversationSk = typeof json?.conversationSk === "number" ? json.conversationSk : undefined;
       const turnNumber = json?.turnNumber;
 
       if (json?.type === "text" && typeof json.text === "string") {
@@ -879,10 +914,112 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       return {
         delta: typeof delta === "string" ? delta : null,
         conversationId,
+        conversationSk,
         turnNumber,
       };
     } catch {
       return { delta: payload };
+    }
+  };
+
+  const normalizeFeedback = (feedback?: FeedbackState): FeedbackState => ({
+    rating: feedback?.rating,
+    category: feedback?.category,
+    comment: feedback?.comment ?? "",
+    status: feedback?.status ?? "idle",
+    error: feedback?.error,
+  });
+
+  const updateMessageFeedback = (
+    threadId: string,
+    messageId: string,
+    updater: (current: FeedbackState) => FeedbackState
+  ) => {
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.id !== threadId) return t;
+        return {
+          ...t,
+          messages: t.messages.map((m) => {
+            if (m.id !== messageId) return m;
+            const nextFeedback = updater(normalizeFeedback(m.feedback));
+            return { ...m, feedback: nextFeedback };
+          }),
+        };
+      })
+    );
+  };
+
+  const submitFeedback = async (threadId: string, message: Message) => {
+    const feedback = normalizeFeedback(message.feedback);
+    if (feedback.status === "submitted" || feedback.status === "submitting") return;
+
+    if (!message.conversationSk || message.turnNumber === undefined) {
+      updateMessageFeedback(threadId, message.id, (current) => ({
+        ...current,
+        status: "error",
+        error: "Feedback metadata is missing for this response.",
+      }));
+      return;
+    }
+
+    if (!sessionContext.reportId) {
+      updateMessageFeedback(threadId, message.id, (current) => ({
+        ...current,
+        status: "error",
+        error: "Report ID is missing for this session.",
+      }));
+      return;
+    }
+
+    if (!feedback.rating) {
+      updateMessageFeedback(threadId, message.id, (current) => ({
+        ...current,
+        status: "error",
+        error: "Please select a rating before submitting.",
+      }));
+      return;
+    }
+
+    updateMessageFeedback(threadId, message.id, (current) => ({
+      ...current,
+      status: "submitting",
+      error: undefined,
+    }));
+
+    try {
+      const response = await fetch("/api/sdac/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationSk: message.conversationSk,
+          reportId: sessionContext.reportId,
+          userId: sessionContext.user.id,
+          sessionId: sessionContext.sessionId,
+          turnNumber: message.turnNumber,
+          rating: feedback.rating,
+          category: feedback.category,
+          comment: feedback.comment?.trim() || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}));
+        const errorMessage = errorPayload?.error ?? `Request failed: ${response.status}`;
+        throw new Error(errorMessage);
+      }
+
+      updateMessageFeedback(threadId, message.id, (current) => ({
+        ...current,
+        status: "submitted",
+        error: undefined,
+      }));
+    } catch (error) {
+      updateMessageFeedback(threadId, message.id, (current) => ({
+        ...current,
+        status: "error",
+        error: error instanceof Error ? error.message : "Failed to submit feedback.",
+      }));
     }
   };
 
@@ -968,6 +1105,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         id: streamMessageId,
         role: "ai",
         content: agentReply.content,
+        conversationSk: agentReply.conversationSk,
+        turnNumber: agentReply.turnNumber,
       };
 
       // Save conversation ID if this is a new conversation
@@ -1329,6 +1468,12 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   const isEmptyStreamingMessage = msg.id === streamingMessageId && !msg.content?.trim();
                   if (isEmptyStreamingMessage) return null;
 
+                  const feedback = normalizeFeedback(msg.feedback);
+                  const feedbackDisabled = feedback.status === "submitted" || feedback.status === "submitting";
+                  const hasFeedbackMetadata =
+                    typeof msg.conversationSk === "number" && typeof msg.turnNumber === "number";
+                  const showFeedback = msg.role === "ai" && !msg.isLocalComponent && msg.id !== streamingMessageId && hasFeedbackMetadata;
+
                   return (
                     <div
                       key={msg.id}
@@ -1347,17 +1492,110 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                           onCreateIssueThread={createIssueThread}
                         />
                       ) : (
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
-                            msg.role === "user"
-                              ? "bg-blue-600 text-white rounded-br-none"
-                              : "bg-white text-slate-800 border border-slate-100 rounded-bl-none"
-                          }`}
-                        >
-                          {msg.role === "user" ? (
-                            msg.content
-                          ) : (
-                            <MessageRenderer content={msg.content} isStreaming={msg.id === streamingMessageId} />
+                        <div className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
+                          <div
+                            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                              msg.role === "user"
+                                ? "bg-blue-600 text-white rounded-br-none"
+                                : "bg-white text-slate-800 border border-slate-100 rounded-bl-none"
+                            }`}
+                          >
+                            {msg.role === "user" ? (
+                              msg.content
+                            ) : (
+                              <MessageRenderer content={msg.content} isStreaming={msg.id === streamingMessageId} />
+                            )}
+                          </div>
+
+                          {showFeedback && (
+                            <div className="mt-1 flex items-center gap-1 ml-1">
+                              {feedback.status === "submitted" ? (
+                                <span className="flex items-center gap-1 text-[11px] text-emerald-600">
+                                  <CheckCircle className="w-3 h-3" /> Thanks!
+                                </span>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    title="Helpful"
+                                    onClick={() => {
+                                      if (feedbackDisabled) return;
+                                      updateMessageFeedback(activeThread.id, msg.id, (current) => ({
+                                        ...current,
+                                        rating: current.rating === 5 ? undefined : 5,
+                                        status: current.status === "error" ? "idle" : current.status,
+                                        error: undefined,
+                                      }));
+                                    }}
+                                    disabled={feedbackDisabled}
+                                    className={`p-1 rounded transition-colors ${
+                                      feedback.rating === 5
+                                        ? "text-emerald-600"
+                                        : "text-slate-300 hover:text-slate-500"
+                                    } ${feedbackDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
+                                  >
+                                    <ThumbsUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    title="Not helpful"
+                                    onClick={() => {
+                                      if (feedbackDisabled) return;
+                                      updateMessageFeedback(activeThread.id, msg.id, (current) => ({
+                                        ...current,
+                                        rating: current.rating === 1 ? undefined : 1,
+                                        status: current.status === "error" ? "idle" : current.status,
+                                        error: undefined,
+                                      }));
+                                    }}
+                                    disabled={feedbackDisabled}
+                                    className={`p-1 rounded transition-colors ${
+                                      feedback.rating === 1
+                                        ? "text-rose-600"
+                                        : "text-slate-300 hover:text-slate-500"
+                                    } ${feedbackDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
+                                  >
+                                    <ThumbsDown className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  {/* Expanded feedback form after rating */}
+                                  {feedback.rating && (
+                                    <>
+                                      <select
+                                        value={feedback.category ?? ""}
+                                        onChange={(event) =>
+                                          updateMessageFeedback(activeThread.id, msg.id, (current) => ({
+                                            ...current,
+                                            category: event.target.value
+                                              ? (event.target.value as FeedbackCategory)
+                                              : undefined,
+                                          }))
+                                        }
+                                        className="ml-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500"
+                                        disabled={feedbackDisabled}
+                                      >
+                                        <option value="">Category</option>
+                                        {feedbackCategories.map((cat) => (
+                                          <option key={cat} value={cat}>{cat}</option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        onClick={() => submitFeedback(activeThread.id, msg)}
+                                        disabled={feedbackDisabled}
+                                        className="ml-1 rounded bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                                      >
+                                        {feedback.status === "submitting" ? "..." : "Send"}
+                                      </button>
+                                    </>
+                                  )}
+
+                                  {feedback.error && (
+                                    <span className="ml-1 text-[11px] text-rose-500">{feedback.error}</span>
+                                  )}
+                                </>
+                              )}
+                            </div>
                           )}
                         </div>
                       )}
