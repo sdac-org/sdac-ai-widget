@@ -39,10 +39,12 @@ test("chat and feedback flow", async ({ page }) => {
 
   await expect(page.getByText("Playwright response")).toBeVisible();
 
-  await page.getByRole("button", { name: "Thumbs up" }).click();
-  await page.getByRole("button", { name: "Submit feedback" }).click();
+  await page.getByRole("button", { name: "Send feedback" }).click();
+  await page.getByRole("combobox").selectOption("clarity");
+  await page.getByPlaceholder("What went wrong?").fill("Needs clearer recommendation");
+  await page.getByRole("button", { name: /^Send$/ }).click();
 
-  await expect(page.getByText("Submitted")).toBeVisible();
+  await expect(page.getByText("Conversation feedback sent")).toBeVisible();
 });
 
 test("evaluate issues flow", async ({ page }) => {
@@ -106,4 +108,50 @@ test("start fresh resets the widget", async ({ page }) => {
   await expect(
     page.getByText("I'm ready to help. You can ask me about the issues I found, or detailed questions about specific positions.")
   ).toBeVisible();
+});
+
+test("conversation feedback works when metadata is unavailable", async ({ page }) => {
+  await page.addInitScript(() => {
+    sessionStorage.setItem("sdac-uploaded-report-id", "8201EDC2-2EDE-4CA1-AF44-D0F5AA185CDB");
+  });
+
+  let feedbackRequestBody: Record<string, unknown> | null = null;
+
+  await page.route("**/api/agent-chat", async (route) => {
+    const responseBody = sseResponse("Response without metadata", {
+      conversationId: "session-no-sk",
+      turnNumber: 2,
+    });
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body: responseBody,
+    });
+  });
+
+  await page.route("**/api/sdac/feedback", async (route) => {
+    feedbackRequestBody = (route.request().postDataJSON() ?? null) as Record<string, unknown> | null;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ success: true, feedbackSk: 556 }),
+    });
+  });
+
+  await page.goto("/#/widget");
+  await page.getByPlaceholder("Ask anything...").fill("Metadata case");
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByText("Response without metadata")).toBeVisible();
+  await page.getByRole("button", { name: /conversation feedback/i }).click();
+  await page.getByRole("combobox").selectOption("clarity");
+  await page.getByPlaceholder("What should improve?").fill("Fallback submit should work");
+  await page.getByRole("button", { name: /^Send$/ }).click();
+
+  await expect(page.getByText("Conversation feedback sent")).toBeVisible();
+  expect(feedbackRequestBody).toMatchObject({
+    conversationId: "session-no-sk",
+    feedbackScope: "conversation",
+    category: "clarity",
+  });
 });

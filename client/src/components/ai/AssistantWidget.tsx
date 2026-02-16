@@ -16,8 +16,6 @@ import {
   UploadCloud,
   FileText,
   RefreshCw,
-  ThumbsUp,
-  ThumbsDown,
 } from "lucide-react";
 import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
 import {
@@ -57,9 +55,9 @@ const feedbackCategories = [
 type FeedbackCategory = (typeof feedbackCategories)[number];
 
 type FeedbackState = {
-  rating?: number;
   category?: FeedbackCategory;
   comment?: string;
+  isOpen?: boolean;
   status: "idle" | "submitting" | "submitted" | "error";
   error?: string;
 };
@@ -69,6 +67,7 @@ type Thread = {
   title: string;
   type: "overview" | "issue" | "general";
   messages: Message[];
+  feedback?: FeedbackState;
   lastMessageAt: Date;
   issueId?: number;
 };
@@ -493,7 +492,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         setActiveReportId(result.reportId);
         console.log("[AssistantWidget] Re-ingest successful, new report ID:", result.reportId);
 
-        // Clear conversation history for the new report (fresh context)
+        // Clear conversation state/history for a fresh context on the new report
+        clearConversation();
         clearConversationId(result.reportId);
 
         // Update message with success
@@ -777,7 +777,9 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   if (typeof json.conversationSk === "number") {
                     responseConversationSk = json.conversationSk;
                   }
-                  responseTurnNumber = json.turnNumber;
+                  if (typeof json.turnNumber === "number") {
+                    responseTurnNumber = json.turnNumber;
+                  }
                   break;
 
                 case "delta":
@@ -817,7 +819,15 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   break;
 
                 case "usage":
+                  break;
+
                 case "done":
+                  if (typeof json.conversationSk === "number") {
+                    responseConversationSk = json.conversationSk;
+                  }
+                  if (typeof json.turnNumber === "number") {
+                    responseTurnNumber = json.turnNumber;
+                  }
                   // Clear any remaining tool indicators
                   setActiveTools(new Map());
                   break;
@@ -923,9 +933,17 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   };
 
   const normalizeFeedback = (feedback?: FeedbackState): FeedbackState => ({
-    rating: feedback?.rating,
     category: feedback?.category,
     comment: feedback?.comment ?? "",
+    isOpen: feedback?.isOpen ?? false,
+    status: feedback?.status ?? "idle",
+    error: feedback?.error,
+  });
+
+  const normalizeThreadFeedback = (feedback?: FeedbackState): FeedbackState => ({
+    category: feedback?.category,
+    comment: feedback?.comment ?? "",
+    isOpen: feedback?.isOpen ?? false,
     status: feedback?.status ?? "idle",
     error: feedback?.error,
   });
@@ -950,12 +968,50 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     );
   };
 
-  const submitFeedback = async (threadId: string, message: Message) => {
-    const feedback = normalizeFeedback(message.feedback);
+  const updateThreadFeedback = (
+    threadId: string,
+    updater: (current: FeedbackState) => FeedbackState
+  ) => {
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.id !== threadId) return t;
+        const nextFeedback = updater(normalizeThreadFeedback(t.feedback));
+        return { ...t, feedback: nextFeedback };
+      })
+    );
+  };
+
+  const getLatestAiFeedbackTarget = (thread: Thread) =>
+    [...thread.messages]
+      .reverse()
+      .find(
+        (message) =>
+          message.role === "ai" &&
+          !message.isLocalComponent &&
+          typeof message.conversationSk === "number" &&
+          typeof message.turnNumber === "number"
+      );
+
+  const submitFeedback = async (
+    params:
+      | { scope: "response"; threadId: string; message: Message }
+      | { scope: "conversation"; threadId: string; thread: Thread }
+  ) => {
+    const isResponseScope = params.scope === "response";
+    const feedback = isResponseScope
+      ? normalizeFeedback(params.message.feedback)
+      : normalizeThreadFeedback(params.thread.feedback);
+
     if (feedback.status === "submitted" || feedback.status === "submitting") return;
 
-    if (!message.conversationSk || message.turnNumber === undefined) {
-      updateMessageFeedback(threadId, message.id, (current) => ({
+    const target = isResponseScope
+      ? params.message
+      : getLatestAiFeedbackTarget(params.thread);
+
+    const conversationIdFallback = sessionContext.conversationId;
+
+    if (!target && isResponseScope) {
+      updateMessageFeedback(params.threadId, params.message.id, (current) => ({
         ...current,
         status: "error",
         error: "Feedback metadata is missing for this response.",
@@ -963,43 +1019,116 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       return;
     }
 
+    if (!target && !conversationIdFallback) {
+      updateThreadFeedback(params.threadId, (current) => ({
+        ...current,
+        status: "error",
+        error: "Feedback will be available after the next assistant response is fully saved.",
+      }));
+      return;
+    }
+
+    const targetConversationSk = target?.conversationSk;
+    const targetTurnNumber = target?.turnNumber;
+
+    if (isResponseScope && (!targetConversationSk || targetTurnNumber === undefined)) {
+      updateMessageFeedback(params.threadId, params.message.id, (current) => ({
+        ...current,
+        status: "error",
+        error: "Feedback metadata is missing for this response.",
+      }));
+      return;
+    }
+
+    if (!targetConversationSk && !conversationIdFallback) {
+      if (isResponseScope) {
+        updateMessageFeedback(params.threadId, params.message.id, (current) => ({
+          ...current,
+          status: "error",
+          error: "Feedback metadata is missing for this response.",
+        }));
+      } else {
+        updateThreadFeedback(params.threadId, (current) => ({
+          ...current,
+          status: "error",
+          error: "Feedback will be available after the next assistant response is fully saved.",
+        }));
+      }
+      return;
+    }
+
     if (!sessionContext.reportId) {
-      updateMessageFeedback(threadId, message.id, (current) => ({
-        ...current,
-        status: "error",
-        error: "Report ID is missing for this session.",
-      }));
+      if (isResponseScope) {
+        updateMessageFeedback(params.threadId, params.message.id, (current) => ({
+          ...current,
+          status: "error",
+          error: "Report ID is missing for this session.",
+        }));
+      } else {
+        updateThreadFeedback(params.threadId, (current) => ({
+          ...current,
+          status: "error",
+          error: "Report ID is missing for this session.",
+        }));
+      }
       return;
     }
 
-    if (!feedback.rating) {
-      updateMessageFeedback(threadId, message.id, (current) => ({
+    if (!feedback.category) {
+      const updateCategoryError = (current: FeedbackState) => ({
         ...current,
-        status: "error",
-        error: "Please select a rating before submitting.",
-      }));
+        status: "error" as const,
+        error: "Please select a feedback category.",
+      });
+      if (isResponseScope) {
+        updateMessageFeedback(params.threadId, params.message.id, updateCategoryError);
+      } else {
+        updateThreadFeedback(params.threadId, updateCategoryError);
+      }
       return;
     }
 
-    updateMessageFeedback(threadId, message.id, (current) => ({
+    const trimmedComment = feedback.comment?.trim() ?? "";
+    if (!trimmedComment) {
+      const updateCommentError = (current: FeedbackState) => ({
+        ...current,
+        status: "error" as const,
+        error: "Please add a short comment before submitting.",
+      });
+      if (isResponseScope) {
+        updateMessageFeedback(params.threadId, params.message.id, updateCommentError);
+      } else {
+        updateThreadFeedback(params.threadId, updateCommentError);
+      }
+      return;
+    }
+
+    const setSubmitting = (current: FeedbackState) => ({
       ...current,
-      status: "submitting",
+      status: "submitting" as const,
       error: undefined,
-    }));
+    });
+    if (isResponseScope) {
+      updateMessageFeedback(params.threadId, params.message.id, setSubmitting);
+    } else {
+      updateThreadFeedback(params.threadId, setSubmitting);
+    }
 
     try {
       const response = await fetch("/api/sdac/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          conversationSk: message.conversationSk,
+          conversationSk: targetConversationSk,
+          conversationId: conversationIdFallback,
           reportId: sessionContext.reportId,
           userId: sessionContext.user.id,
           sessionId: sessionContext.sessionId,
-          turnNumber: message.turnNumber,
-          rating: feedback.rating,
+          agentId: agentId || "sdac-coordinator-release",
+          feedbackScope: params.scope,
+          turnNumber: targetTurnNumber,
           category: feedback.category,
-          comment: feedback.comment?.trim() || undefined,
+          comment: trimmedComment,
         }),
       });
 
@@ -1009,17 +1138,28 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         throw new Error(errorMessage);
       }
 
-      updateMessageFeedback(threadId, message.id, (current) => ({
+      const setSubmitted = (current: FeedbackState) => ({
         ...current,
-        status: "submitted",
+        status: "submitted" as const,
+        isOpen: false,
         error: undefined,
-      }));
+      });
+      if (isResponseScope) {
+        updateMessageFeedback(params.threadId, params.message.id, setSubmitted);
+      } else {
+        updateThreadFeedback(params.threadId, setSubmitted);
+      }
     } catch (error) {
-      updateMessageFeedback(threadId, message.id, (current) => ({
+      const setError = (current: FeedbackState) => ({
         ...current,
-        status: "error",
+        status: "error" as const,
         error: error instanceof Error ? error.message : "Failed to submit feedback.",
-      }));
+      });
+      if (isResponseScope) {
+        updateMessageFeedback(params.threadId, params.message.id, setError);
+      } else {
+        updateThreadFeedback(params.threadId, setError);
+      }
     }
   };
 
@@ -1498,17 +1638,19 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                               msg.role === "user"
                                 ? "bg-blue-600 text-white rounded-br-none"
                                 : "bg-white text-slate-800 border border-slate-100 rounded-bl-none"
-                            }`}
+                            } break-words [overflow-wrap:anywhere]`}
                           >
                             {msg.role === "user" ? (
                               msg.content
                             ) : (
-                              <MessageRenderer content={msg.content} isStreaming={msg.id === streamingMessageId} />
+                              <div className="break-words [overflow-wrap:anywhere]">
+                                <MessageRenderer content={msg.content} isStreaming={msg.id === streamingMessageId} />
+                              </div>
                             )}
                           </div>
 
                           {showFeedback && (
-                            <div className="mt-1 flex items-center gap-1 ml-1">
+                            <div className="mt-1 flex flex-wrap items-center gap-1 ml-1 max-w-[85%]">
                               {feedback.status === "submitted" ? (
                                 <span className="flex items-center gap-1 text-[11px] text-emerald-600">
                                   <CheckCircle className="w-3 h-3" /> Thanks!
@@ -1517,50 +1659,24 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                                 <>
                                   <button
                                     type="button"
-                                    title="Helpful"
+                                    title="Send feedback"
                                     onClick={() => {
                                       if (feedbackDisabled) return;
                                       updateMessageFeedback(activeThread.id, msg.id, (current) => ({
                                         ...current,
-                                        rating: current.rating === 5 ? undefined : 5,
+                                        isOpen: !current.isOpen,
                                         status: current.status === "error" ? "idle" : current.status,
                                         error: undefined,
                                       }));
                                     }}
                                     disabled={feedbackDisabled}
-                                    className={`p-1 rounded transition-colors ${
-                                      feedback.rating === 5
-                                        ? "text-emerald-600"
-                                        : "text-slate-300 hover:text-slate-500"
-                                    } ${feedbackDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
+                                    className={`rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800 ${feedbackDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
                                   >
-                                    <ThumbsUp className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title="Not helpful"
-                                    onClick={() => {
-                                      if (feedbackDisabled) return;
-                                      updateMessageFeedback(activeThread.id, msg.id, (current) => ({
-                                        ...current,
-                                        rating: current.rating === 1 ? undefined : 1,
-                                        status: current.status === "error" ? "idle" : current.status,
-                                        error: undefined,
-                                      }));
-                                    }}
-                                    disabled={feedbackDisabled}
-                                    className={`p-1 rounded transition-colors ${
-                                      feedback.rating === 1
-                                        ? "text-rose-600"
-                                        : "text-slate-300 hover:text-slate-500"
-                                    } ${feedbackDisabled ? "opacity-60 cursor-not-allowed" : ""}`}
-                                  >
-                                    <ThumbsDown className="w-3.5 h-3.5" />
+                                    Send feedback
                                   </button>
 
-                                  {/* Expanded feedback form after rating */}
-                                  {feedback.rating && (
-                                    <>
+                                  {feedback.isOpen && (
+                                    <div className="flex w-full flex-wrap items-center gap-1">
                                       <select
                                         value={feedback.category ?? ""}
                                         onChange={(event) =>
@@ -1571,23 +1687,57 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                                               : undefined,
                                           }))
                                         }
-                                        className="ml-1 rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500"
+                                        className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-500"
                                         disabled={feedbackDisabled}
                                       >
-                                        <option value="">Category</option>
+                                        <option value="">Select category</option>
                                         {feedbackCategories.map((cat) => (
                                           <option key={cat} value={cat}>{cat}</option>
                                         ))}
                                       </select>
+                                      <input
+                                        type="text"
+                                        value={feedback.comment ?? ""}
+                                        onChange={(event) =>
+                                          updateMessageFeedback(activeThread.id, msg.id, (current) => ({
+                                            ...current,
+                                            comment: event.target.value,
+                                          }))
+                                        }
+                                        placeholder="What went wrong?"
+                                        className="min-w-[140px] flex-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600"
+                                        disabled={feedbackDisabled}
+                                      />
                                       <button
                                         type="button"
-                                        onClick={() => submitFeedback(activeThread.id, msg)}
+                                        onClick={() =>
+                                          submitFeedback({
+                                            scope: "response",
+                                            threadId: activeThread.id,
+                                            message: msg,
+                                          })
+                                        }
                                         disabled={feedbackDisabled}
-                                        className="ml-1 rounded bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                                        className="rounded bg-slate-800 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
                                       >
                                         {feedback.status === "submitting" ? "..." : "Send"}
                                       </button>
-                                    </>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          updateMessageFeedback(activeThread.id, msg.id, (current) => ({
+                                            ...current,
+                                            isOpen: false,
+                                            error: undefined,
+                                            status: current.status === "error" ? "idle" : current.status,
+                                          }))
+                                        }
+                                        disabled={feedbackDisabled}
+                                        className="rounded border border-slate-200 px-2 py-0.5 text-[11px] text-slate-500 hover:text-slate-700 disabled:opacity-50 transition-colors"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
                                   )}
 
                                   {feedback.error && (
@@ -1669,6 +1819,118 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                     </div>
                   </div>
                 )}
+
+                {activeThread && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    {normalizeThreadFeedback(activeThread.feedback).status === "submitted" ? (
+                      <span className="flex items-center gap-1 text-emerald-600">
+                        <CheckCircle className="w-3 h-3" /> Conversation feedback sent
+                      </span>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          title="Send conversation feedback"
+                          onClick={() => {
+                            const hasFeedbackTarget = !!getLatestAiFeedbackTarget(activeThread);
+                            const hasConversationFallback = !!sessionContext.conversationId;
+                            if (!hasFeedbackTarget && !hasConversationFallback) {
+                              updateThreadFeedback(activeThread.id, (current) => ({
+                                ...current,
+                                isOpen: false,
+                                status: "error",
+                                error: "Feedback will be available after the next assistant response is fully saved.",
+                              }));
+                              return;
+                            }
+
+                            updateThreadFeedback(activeThread.id, (current) => ({
+                              ...current,
+                              isOpen: !current.isOpen,
+                              status: current.status === "error" ? "idle" : current.status,
+                              error: undefined,
+                            }));
+                          }}
+                          className="rounded border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800"
+                        >
+                          Conversation feedback
+                        </button>
+
+                        {normalizeThreadFeedback(activeThread.feedback).isOpen && (
+                          <div className="flex w-full flex-wrap items-center gap-2">
+                            <select
+                              value={normalizeThreadFeedback(activeThread.feedback).category ?? ""}
+                              onChange={(event) =>
+                                updateThreadFeedback(activeThread.id, (current) => ({
+                                  ...current,
+                                  category: event.target.value
+                                    ? (event.target.value as FeedbackCategory)
+                                    : undefined,
+                                }))
+                              }
+                              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-500"
+                            >
+                              <option value="">Select category</option>
+                              {feedbackCategories.map((cat) => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
+
+                            <input
+                              type="text"
+                              value={normalizeThreadFeedback(activeThread.feedback).comment ?? ""}
+                              onChange={(event) =>
+                                updateThreadFeedback(activeThread.id, (current) => ({
+                                  ...current,
+                                  comment: event.target.value,
+                                }))
+                              }
+                              placeholder="What should improve?"
+                              className="min-w-[160px] flex-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-slate-600"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                submitFeedback({
+                                  scope: "conversation",
+                                  threadId: activeThread.id,
+                                  thread: activeThread,
+                                })
+                              }
+                              disabled={normalizeThreadFeedback(activeThread.feedback).status === "submitting"}
+                              className="rounded bg-slate-800 px-2 py-0.5 font-medium text-white hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                            >
+                              {normalizeThreadFeedback(activeThread.feedback).status === "submitting" ? "..." : "Send"}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateThreadFeedback(activeThread.id, (current) => ({
+                                  ...current,
+                                  isOpen: false,
+                                  error: undefined,
+                                  status: current.status === "error" ? "idle" : current.status,
+                                }))
+                              }
+                              className="rounded border border-slate-200 px-2 py-0.5 text-slate-500 hover:text-slate-700 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        )}
+
+                        {normalizeThreadFeedback(activeThread.feedback).error && (
+                          <span className="text-rose-500">
+                            {normalizeThreadFeedback(activeThread.feedback).error}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <div className="relative">
                   <input
                     type="text"

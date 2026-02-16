@@ -10,75 +10,19 @@
  * Mastra owns the conversation ID - we just store what it returns.
  */
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 import { createSessionContext, type SessionContext, type UserInfo } from "@/types/session-context";
+import {
+  clearConversationId,
+  clearUploadedReportId,
+  getConversationId,
+  getOrCreateSessionId,
+  getUploadedReportId,
+  saveConversationId,
+  saveUploadedReportId,
+} from "@/lib/session-manager";
 
-// Storage keys
-const SESSION_ID_KEY = "sdac-session-id";
-const CONVERSATION_KEY_PREFIX = "sdac-conversation-";
-const UPLOADED_REPORT_ID_KEY = "sdac-uploaded-report-id";
-
-/**
- * Get or create a browser session ID
- * Persists for the lifetime of the browser tab
- */
-function getOrCreateSessionId(): string {
-  let sessionId = sessionStorage.getItem(SESSION_ID_KEY);
-  if (!sessionId) {
-    sessionId = crypto.randomUUID();
-    sessionStorage.setItem(SESSION_ID_KEY, sessionId);
-  }
-  return sessionId;
-}
-
-/**
- * Get conversation ID for a specific report (tab-scoped)
- * Returns null if no conversation exists (new conversation)
- */
-function getConversationId(reportId: string): string | null {
-  if (!reportId) return null;
-  // Use sessionStorage for tab-scoped persistence (not localStorage)
-  return sessionStorage.getItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
-}
-
-/**
- * Save conversation ID for a specific report (tab-scoped)
- */
-function saveConversationId(reportId: string, conversationId: string): void {
-  if (!reportId || !conversationId) return;
-  // Use sessionStorage for tab-scoped persistence (not localStorage)
-  sessionStorage.setItem(`${CONVERSATION_KEY_PREFIX}${reportId}`, conversationId);
-}
-
-/**
- * Clear conversation ID for a specific report (start fresh)
- */
-export function clearConversationId(reportId: string): void {
-  if (!reportId) return;
-  sessionStorage.removeItem(`${CONVERSATION_KEY_PREFIX}${reportId}`);
-}
-
-/**
- * Get the uploaded report ID (ephemeral, clears on refresh)
- */
-export function getUploadedReportId(): string | null {
-  return sessionStorage.getItem(UPLOADED_REPORT_ID_KEY);
-}
-
-/**
- * Save the uploaded report ID (ephemeral, clears on refresh)
- */
-export function saveUploadedReportId(reportId: string): void {
-  if (!reportId) return;
-  sessionStorage.setItem(UPLOADED_REPORT_ID_KEY, reportId);
-}
-
-/**
- * Clear the uploaded report ID
- */
-export function clearUploadedReportId(): void {
-  sessionStorage.removeItem(UPLOADED_REPORT_ID_KEY);
-}
+export { clearConversationId, clearUploadedReportId, getUploadedReportId, saveUploadedReportId };
 
 interface UseSessionContextOptions {
   /** Report ID (Mastra fetches report data from DB) */
@@ -143,6 +87,10 @@ export function useSessionContext(options: UseSessionContextOptions): UseSession
   const [conversationId, setConversationIdState] = useState<string | null>(
     () => getConversationId(reportId)
   );
+
+  useEffect(() => {
+    setConversationIdState(getConversationId(reportId));
+  }, [reportId]);
 
   // Update conversation ID and persist to localStorage
   const setConversationId = useCallback((id: string) => {

@@ -32,7 +32,11 @@ const mockAgentChat = (payload: { conversationSk?: number; turnNumber: number; c
       turnNumber: payload.turnNumber,
     }),
     buildSseChunk("delta", { content: payload.content }),
-    buildSseChunk("done", { success: true }),
+    buildSseChunk("done", {
+      success: true,
+      ...(payload.conversationSk !== undefined && { conversationSk: payload.conversationSk }),
+      turnNumber: payload.turnNumber,
+    }),
   ]);
 
   server.use(
@@ -53,12 +57,23 @@ const getFeedbackScope = async (responseText: RegExp) => {
   let current: HTMLElement | null = messageNode instanceof HTMLElement ? messageNode : null;
   while (current) {
     const parent = current.parentElement;
-    if (parent?.textContent?.includes("Was this response helpful?")) {
+    if (parent?.textContent?.includes("Send feedback")) {
       return within(parent);
     }
     current = parent;
   }
   throw new Error("Unable to locate feedback container for message");
+};
+
+const findAncestorWithClassFragment = (node: HTMLElement, classFragment: string) => {
+  let current: HTMLElement | null = node;
+  while (current) {
+    if (typeof current.className === "string" && current.className.includes(classFragment)) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
 };
 
 describe("AssistantWidget feedback", () => {
@@ -104,13 +119,11 @@ describe("AssistantWidget feedback", () => {
 
     const feedbackScope = await getFeedbackScope(/Helpful response/i);
 
-    const submitButton = feedbackScope.getByRole("button", { name: /submit feedback/i });
-    expect(submitButton).toBeDisabled();
+    await userEvent.click(feedbackScope.getByRole("button", { name: /send feedback/i }));
+    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "clarity");
+    await userEvent.type(feedbackScope.getByPlaceholderText(/what went wrong\?/i), "Needs clearer steps.");
 
-    const thumbsUp = feedbackScope.getByRole("button", { name: /thumbs up/i });
-    await userEvent.click(thumbsUp);
-
-    await waitFor(() => expect(submitButton).toBeEnabled());
+    const submitButton = feedbackScope.getByRole("button", { name: /^send$/i });
     await userEvent.click(submitButton);
 
     await waitFor(() => expect(feedbackBody).not.toBeNull());
@@ -119,14 +132,17 @@ describe("AssistantWidget feedback", () => {
       reportId: REPORT_ID,
       sessionId: expect.any(String),
       userId: "demo-user",
+      agentId: "sdac-coordinator-release",
+      feedbackScope: "response",
       turnNumber: 3,
-      rating: 5,
+      category: "clarity",
+      comment: "Needs clearer steps.",
     });
 
-    expect(feedbackScope.getByText(/submitted/i)).toBeInTheDocument();
+    expect(feedbackScope.getByText(/thanks!/i)).toBeInTheDocument();
   });
 
-  it("disables feedback submission when metadata is missing", async () => {
+  it("hides response feedback when metadata is missing", async () => {
     mockAgentChat({ turnNumber: 2, content: "Response without metadata" });
 
     render(<AssistantWidget />);
@@ -135,18 +151,77 @@ describe("AssistantWidget feedback", () => {
     await userEvent.type(input, "Another question");
     await userEvent.keyboard("{Enter}");
 
-    const feedbackScope = await getFeedbackScope(/Response without metadata/i);
-
-    const thumbsDown = feedbackScope.getByRole("button", { name: /thumbs down/i });
-    await userEvent.click(thumbsDown);
-
-    const submitButton = feedbackScope.getByRole("button", { name: /submit feedback/i });
-    expect(submitButton).toBeDisabled();
-
-    expect(feedbackScope.getByText(/feedback metadata is unavailable/i)).toBeInTheDocument();
+    await screen.findByText(/Response without metadata/i);
+    expect(screen.queryByRole("button", { name: /send feedback/i })).not.toBeInTheDocument();
   });
 
-  it("sends category and comment when provided", async () => {
+  it("submits conversation feedback using conversationId fallback when response metadata is unavailable", async () => {
+    mockAgentChat({ turnNumber: 2, content: "Response without metadata" });
+
+    let feedbackBody: Record<string, unknown> | null = null;
+    mockFeedback(() =>
+      new HttpResponse(JSON.stringify({ success: true, feedbackSk: 991 }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      })
+    );
+
+    server.events.on("request:end", async ({ request }) => {
+      if (request.url.endsWith("/api/sdac/feedback")) {
+        feedbackBody = (await request.json()) as Record<string, unknown>;
+      }
+    });
+
+    render(<AssistantWidget />);
+
+    const input = screen.getByPlaceholderText("Ask anything...");
+    await userEvent.type(input, "Another question");
+    await userEvent.keyboard("{Enter}");
+
+    await screen.findByText(/Response without metadata/i);
+
+    const conversationButton = screen.getByRole("button", { name: /conversation feedback/i });
+    expect(conversationButton).toBeEnabled();
+
+    await userEvent.click(conversationButton);
+    await userEvent.selectOptions(screen.getByRole("combobox"), "clarity");
+    await userEvent.type(screen.getByPlaceholderText(/what should improve\?/i), "Conversation-level fallback works");
+    await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(() => expect(feedbackBody).not.toBeNull());
+    expect(feedbackBody).toMatchObject({
+      conversationId: "session-1",
+      feedbackScope: "conversation",
+      category: "clarity",
+      comment: "Conversation-level fallback works",
+    });
+  });
+
+  it("renders long unbroken strings without dropping content", async () => {
+    const longToken = "15913407DBC24ECC84511E9BC87647F5";
+    mockAgentChat({
+      conversationSk: 101,
+      turnNumber: 5,
+      content: `Report token ${longToken}`,
+    });
+
+    render(<AssistantWidget />);
+
+    const input = screen.getByPlaceholderText("Ask anything...");
+    await userEvent.type(input, "Show token");
+    await userEvent.keyboard("{Enter}");
+
+    const tokenNode = await screen.findByText(new RegExp(longToken, "i"));
+    expect(tokenNode).toBeInTheDocument();
+
+    const wrappingContainer = findAncestorWithClassFragment(
+      tokenNode as HTMLElement,
+      "overflow-wrap:anywhere"
+    );
+    expect(wrappingContainer).toBeTruthy();
+  });
+
+  it("sends conversation-level feedback", async () => {
     mockAgentChat({ conversationSk: 88, turnNumber: 4, content: "Detailed response" });
 
     let feedbackBody: Record<string, unknown> | null = null;
@@ -169,22 +244,17 @@ describe("AssistantWidget feedback", () => {
     await userEvent.type(input, "Give me details");
     await userEvent.keyboard("{Enter}");
 
-    const feedbackScope = await getFeedbackScope(/Detailed response/i);
-
-    await userEvent.click(feedbackScope.getByRole("button", { name: /thumbs down/i }));
-    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "clarity");
-    await userEvent.type(
-      feedbackScope.getByPlaceholderText(/add a comment/i),
-      "Needs more detail on fringe variance"
-    );
-
-    await userEvent.click(feedbackScope.getByRole("button", { name: /submit feedback/i }));
+    await screen.findByText(/Detailed response/i);
+    await userEvent.click(screen.getByRole("button", { name: /conversation feedback/i }));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "clarity");
+    await userEvent.type(screen.getByPlaceholderText(/what should improve\?/i), "Needs more detail on fringe variance");
+    await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
     await waitFor(() => expect(feedbackBody).not.toBeNull());
     expect(feedbackBody).toMatchObject({
       conversationSk: 88,
       turnNumber: 4,
-      rating: 1,
+      feedbackScope: "conversation",
       category: "clarity",
       comment: "Needs more detail on fringe variance",
     });
@@ -207,15 +277,17 @@ describe("AssistantWidget feedback", () => {
     await userEvent.keyboard("{Enter}");
 
     const feedbackScope = await getFeedbackScope(/Another response/i);
-    await userEvent.click(feedbackScope.getByRole("button", { name: /thumbs up/i }));
-    await userEvent.click(feedbackScope.getByRole("button", { name: /submit feedback/i }));
+    await userEvent.click(feedbackScope.getByRole("button", { name: /send feedback/i }));
+    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "accuracy");
+    await userEvent.type(feedbackScope.getByPlaceholderText(/what went wrong\?/i), "Not accurate.");
+    await userEvent.click(feedbackScope.getByRole("button", { name: /^send$/i }));
 
     expect(
-      await screen.findByText(/Rating must be between 1 and 5/i)
+      await screen.findByText(/Rating must be between 1 and 5|Invalid request body/i)
     ).toBeInTheDocument();
   });
 
-  it("disables controls after successful submission", async () => {
+  it("closes response feedback controls after successful submission", async () => {
     mockAgentChat({ conversationSk: 55, turnNumber: 1, content: "Final response" });
 
     mockFeedback(() =>
@@ -232,14 +304,13 @@ describe("AssistantWidget feedback", () => {
     await userEvent.keyboard("{Enter}");
 
     const feedbackScope = await getFeedbackScope(/Final response/i);
-    const thumbsUp = feedbackScope.getByRole("button", { name: /thumbs up/i });
-    const submitButton = feedbackScope.getByRole("button", { name: /submit feedback/i });
-
-    await userEvent.click(thumbsUp);
+    await userEvent.click(feedbackScope.getByRole("button", { name: /send feedback/i }));
+    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "other");
+    await userEvent.type(feedbackScope.getByPlaceholderText(/what went wrong\?/i), "General suggestion.");
+    const submitButton = feedbackScope.getByRole("button", { name: /^send$/i });
     await userEvent.click(submitButton);
 
-    await screen.findByText(/submitted/i);
-    expect(thumbsUp).toBeDisabled();
-    expect(submitButton).toBeDisabled();
+    await screen.findByText(/thanks!/i);
+    expect(feedbackScope.queryByPlaceholderText(/what went wrong\?/i)).not.toBeInTheDocument();
   });
 });

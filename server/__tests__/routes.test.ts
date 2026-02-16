@@ -128,8 +128,11 @@ describe("server routes", () => {
       reportId: "8201EDC2-2EDE-4CA1-AF44-D0F5AA185CDB",
       userId: "user-1",
       sessionId: "session-1",
+      agentId: "sdac-coordinator-release",
+      feedbackScope: "response",
       turnNumber: 1,
-      rating: 5,
+      category: "clarity",
+      comment: "Needs more detail",
     });
 
     expect(res.status).toBe(200);
@@ -162,8 +165,11 @@ describe("server routes", () => {
       reportId: "F5BAE2DB-1D7D-40E8-9FBB-9C3D6AC2D9C2",
       userId: "user-2",
       sessionId: "session-2",
+      agentId: "sdac-coordinator-release",
+      feedbackScope: "conversation",
       turnNumber: 2,
-      rating: 4,
+      category: "accuracy",
+      comment: "Conversation had incorrect assumptions",
     });
 
     expect(res.status).toBe(200);
@@ -171,6 +177,44 @@ describe("server routes", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://mastra.local/sdac/feedback",
       expect.any(Object)
+    );
+  });
+
+  it("logs a warning when feedback payload is missing conversation target", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: false }));
+    const server = createServer(app);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/sdac/feedback")) {
+        return jsonResponse({ success: true, feedbackSk: 789 });
+      }
+      return jsonResponse({ status: "ok" });
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await registerRoutes(server, app);
+
+    const res = await request(app).post("/api/sdac/feedback").send({
+      reportId: "8201EDC2-2EDE-4CA1-AF44-D0F5AA185CDB",
+      userId: "user-1",
+      sessionId: "session-1",
+      agentId: "sdac-coordinator-release",
+      feedbackScope: "conversation",
+      category: "clarity",
+      comment: "No conversation target in payload",
+    });
+
+    expect(res.status).toBe(200);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[routes] Feedback payload validation warning:",
+      expect.objectContaining({
+        issues: expect.arrayContaining(["conversationSk or conversationId is required"]),
+      })
     );
   });
 

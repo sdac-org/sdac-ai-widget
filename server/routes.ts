@@ -23,14 +23,17 @@ interface AgentChatRequest {
  * Feedback payload from widget
  */
 interface FeedbackRequest {
-  conversationSk: number;
+  conversationSk?: number;
+  conversationId?: string;
   reportId: string;
   userId: string;
   sessionId: string;
-  turnNumber: number;
-  rating: number;
+  agentId: string;
+  feedbackScope: "response" | "conversation";
+  turnNumber?: number;
+  rating?: number;
   category?: string;
-  comment?: string;
+  comment: string;
 }
 
 /**
@@ -186,6 +189,45 @@ export async function registerRoutes(
     console.log(`[routes] ${req.path} called`);
     const payload = (req.body ?? {}) as FeedbackRequest;
 
+    const payloadSummary = {
+      reportId: payload.reportId,
+      userId: payload.userId,
+      sessionId: payload.sessionId,
+      agentId: payload.agentId,
+      feedbackScope: payload.feedbackScope,
+      conversationSk: payload.conversationSk,
+      conversationId: payload.conversationId,
+      turnNumber: payload.turnNumber,
+      category: payload.category,
+      commentLength: typeof payload.comment === "string" ? payload.comment.length : 0,
+    };
+
+    const validationIssues: string[] = [];
+    if (!payload.reportId) validationIssues.push("reportId is required");
+    if (!payload.userId) validationIssues.push("userId is required");
+    if (!payload.sessionId) validationIssues.push("sessionId is required");
+    if (!payload.agentId) validationIssues.push("agentId is required");
+    if (!payload.feedbackScope || !["response", "conversation"].includes(payload.feedbackScope)) {
+      validationIssues.push("feedbackScope must be response or conversation");
+    }
+    if (!payload.category) validationIssues.push("category is required");
+    if (!payload.comment || !payload.comment.trim()) validationIssues.push("comment is required");
+
+    const hasConversationTarget =
+      typeof payload.conversationSk === "number" ||
+      (typeof payload.conversationId === "string" && payload.conversationId.trim().length > 0);
+
+    if (!hasConversationTarget) {
+      validationIssues.push("conversationSk or conversationId is required");
+    }
+
+    if (validationIssues.length > 0) {
+      console.warn("[routes] Feedback payload validation warning:", {
+        issues: validationIssues,
+        payload: payloadSummary,
+      });
+    }
+
     const baseUrl = (process.env.MASTRA_BASE_URL || "http://localhost:4111").replace(/\/$/, "");
     const endpoint = `${baseUrl}/sdac/feedback`;
 
@@ -198,6 +240,13 @@ export async function registerRoutes(
 
       if (!response.ok) {
         const errorPayload = await response.json().catch(() => ({}));
+        console.error("[routes] Feedback upstream rejected payload:", {
+          status: response.status,
+          endpoint,
+          error: errorPayload?.error,
+          details: errorPayload?.details,
+          payload: payloadSummary,
+        });
         return res.status(response.status).json({
           error: errorPayload?.error ?? "Feedback request failed",
           details: errorPayload?.details,
@@ -208,7 +257,11 @@ export async function registerRoutes(
       return res.status(200).json(data);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unable to reach Mastra";
-      console.error("[routes] Feedback proxy error:", errorMessage);
+      console.error("[routes] Feedback proxy error:", {
+        error: errorMessage,
+        endpoint,
+        payload: payloadSummary,
+      });
       return res.status(502).json({ error: errorMessage });
     }
   };
