@@ -48,6 +48,52 @@ const mockAgentChat = (payload: { conversationSk?: number; turnNumber: number; c
   );
 };
 
+const mockAgentChatWithFinalDoneBuffer = (payload: { conversationSk: number; turnNumber: number; content: string }) => {
+  const stream = createSseStream([
+    buildSseChunk("metadata", {
+      conversationId: "session-1",
+      turnNumber: payload.turnNumber,
+    }),
+    buildSseChunk("delta", { content: payload.content }),
+    `event: done\ndata: ${JSON.stringify({
+      success: true,
+      conversationSk: payload.conversationSk,
+      turnNumber: payload.turnNumber,
+    })}`,
+  ]);
+
+  server.use(
+    http.post("*/api/agent-chat", () =>
+      new HttpResponse(stream, {
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+  );
+};
+
+const mockAgentChatWithStringConversationSk = (payload: { conversationSk: string; turnNumber: number; content: string }) => {
+  const stream = createSseStream([
+    buildSseChunk("metadata", {
+      conversationId: "session-1",
+      turnNumber: payload.turnNumber,
+    }),
+    buildSseChunk("delta", { content: payload.content }),
+    buildSseChunk("done", {
+      success: true,
+      conversationSk: payload.conversationSk,
+      turnNumber: payload.turnNumber,
+    }),
+  ]);
+
+  server.use(
+    http.post("*/api/agent-chat", () =>
+      new HttpResponse(stream, {
+        headers: { "Content-Type": "text/event-stream" },
+      })
+    )
+  );
+};
+
 const mockFeedback = (handler: (request: Request) => HttpResponse) => {
   server.use(http.post("*/api/sdac/feedback", ({ request }) => handler(request)));
 };
@@ -135,11 +181,104 @@ describe("AssistantWidget feedback", () => {
       agentId: "sdac-coordinator-release",
       feedbackScope: "response",
       turnNumber: 3,
+      rating: 3,
       category: "clarity",
       comment: "Needs clearer steps.",
     });
 
     expect(feedbackScope.getByText(/thanks!/i)).toBeInTheDocument();
+  });
+
+  it("submits feedback after first message when done metadata is in final stream buffer", async () => {
+    mockAgentChatWithFinalDoneBuffer({ conversationSk: 321, turnNumber: 1, content: "First response" });
+
+    let feedbackBody: Record<string, unknown> | null = null;
+    mockFeedback(() =>
+      new HttpResponse(
+        JSON.stringify({
+          success: true,
+          feedbackSk: 124,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        }
+      )
+    );
+
+    server.events.on("request:end", async ({ request }) => {
+      if (request.url.endsWith("/api/sdac/feedback")) {
+        feedbackBody = (await request.json()) as Record<string, unknown>;
+      }
+    });
+
+    render(<AssistantWidget />);
+
+    const input = screen.getByPlaceholderText("Ask anything...");
+    await userEvent.type(input, "First turn question");
+    await userEvent.keyboard("{Enter}");
+
+    const feedbackScope = await getFeedbackScope(/First response/i);
+    await userEvent.click(feedbackScope.getByRole("button", { name: /send feedback/i }));
+    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "clarity");
+    await userEvent.type(feedbackScope.getByPlaceholderText(/what went wrong\?/i), "Initial response feedback.");
+    await userEvent.click(feedbackScope.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(() => expect(feedbackBody).not.toBeNull());
+    expect(feedbackBody).toMatchObject({
+      conversationSk: 321,
+      turnNumber: 1,
+      feedbackScope: "response",
+      rating: 3,
+      category: "clarity",
+      comment: "Initial response feedback.",
+    });
+  });
+
+  it("submits feedback when done event returns conversationSk as string", async () => {
+    mockAgentChatWithStringConversationSk({ conversationSk: "112", turnNumber: 2, content: "String SK response" });
+
+    let feedbackBody: Record<string, unknown> | null = null;
+    mockFeedback(() =>
+      new HttpResponse(
+        JSON.stringify({
+          success: true,
+          feedbackSk: 125,
+        }),
+        {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        }
+      )
+    );
+
+    server.events.on("request:end", async ({ request }) => {
+      if (request.url.endsWith("/api/sdac/feedback")) {
+        feedbackBody = (await request.json()) as Record<string, unknown>;
+      }
+    });
+
+    render(<AssistantWidget />);
+
+    const input = screen.getByPlaceholderText("Ask anything...");
+    await userEvent.type(input, "Use string conversation sk");
+    await userEvent.keyboard("{Enter}");
+
+    const feedbackScope = await getFeedbackScope(/String SK response/i);
+    await userEvent.click(feedbackScope.getByRole("button", { name: /send feedback/i }));
+    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "accuracy");
+    await userEvent.type(feedbackScope.getByPlaceholderText(/what went wrong\?/i), "String sk should still submit.");
+    await userEvent.click(feedbackScope.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(() => expect(feedbackBody).not.toBeNull());
+    expect(feedbackBody).toMatchObject({
+      conversationSk: 112,
+      turnNumber: 2,
+      feedbackScope: "response",
+      rating: 3,
+      category: "accuracy",
+      comment: "String sk should still submit.",
+    });
   });
 
   it("hides response feedback when metadata is missing", async () => {
@@ -155,7 +294,7 @@ describe("AssistantWidget feedback", () => {
     expect(screen.queryByRole("button", { name: /send feedback/i })).not.toBeInTheDocument();
   });
 
-  it("submits conversation feedback using conversationId fallback when response metadata is unavailable", async () => {
+  it("blocks conversation feedback when response metadata is unavailable", async () => {
     mockAgentChat({ turnNumber: 2, content: "Response without metadata" });
 
     let feedbackBody: Record<string, unknown> | null = null;
@@ -184,17 +323,12 @@ describe("AssistantWidget feedback", () => {
     expect(conversationButton).toBeEnabled();
 
     await userEvent.click(conversationButton);
-    await userEvent.selectOptions(screen.getByRole("combobox"), "clarity");
-    await userEvent.type(screen.getByPlaceholderText(/what should improve\?/i), "Conversation-level fallback works");
-    await userEvent.click(screen.getByRole("button", { name: /^send$/i }));
 
-    await waitFor(() => expect(feedbackBody).not.toBeNull());
-    expect(feedbackBody).toMatchObject({
-      conversationId: "session-1",
-      feedbackScope: "conversation",
-      category: "clarity",
-      comment: "Conversation-level fallback works",
-    });
+    expect(
+      await screen.findByText(/Feedback will be available after the next assistant response is fully saved\./i)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(feedbackBody).toBeNull();
   });
 
   it("renders long unbroken strings without dropping content", async () => {
@@ -255,6 +389,7 @@ describe("AssistantWidget feedback", () => {
       conversationSk: 88,
       turnNumber: 4,
       feedbackScope: "conversation",
+      rating: 3,
       category: "clarity",
       comment: "Needs more detail on fringe variance",
     });

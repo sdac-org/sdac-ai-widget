@@ -343,4 +343,47 @@ describe("server routes", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/user_email, user_name, and district/i);
   });
+
+  it("surfaces upstream sdac upload validation message", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: false }));
+    const server = createServer(app);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.endsWith("/sdac/upload")) {
+        return jsonResponse(
+          {
+            status: "error",
+            error_code: "INVALID_SDAC_TEMPLATE",
+            error_category: "wrong_file_format",
+            message:
+              "Invalid SDAC file format. Please upload the standard SDAC cost report template (.xlsx or .xls) with the expected headers.",
+            details: ["Expected header labels include: Source, Function, Job Title, First Name, Last Name, Gross Salary."],
+          },
+          400
+        );
+      }
+      return jsonResponse({ status: "ok" });
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    await registerRoutes(server, app);
+
+    const res = await request(app)
+      .post("/api/upload/sdac")
+      .attach("upload", Buffer.from("dummy"), "invalid.xlsx")
+      .field("user_email", "user@example.com")
+      .field("user_name", "Demo User")
+      .field("district", "Demo District");
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid SDAC file format/i);
+    expect(res.body.errorCode).toBe("INVALID_SDAC_TEMPLATE");
+    expect(res.body.errorCategory).toBe("wrong_file_format");
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([expect.stringMatching(/Expected header labels/i)])
+    );
+  });
 });

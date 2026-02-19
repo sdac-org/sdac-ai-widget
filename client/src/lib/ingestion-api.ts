@@ -8,6 +8,10 @@ const API_BASE = "";
 
 export interface IngestionResponse {
   success: boolean;
+  error?: string;
+  errorCode?: string;
+  errorCategory?: "wrong_file_format" | "missing_data" | "processing_error" | string;
+  details?: string[];
   message?: string;
   jobId?: string;
   reportId?: string;
@@ -87,7 +91,23 @@ export async function uploadSdacReport(params: SdacUploadParams): Promise<Ingest
 
     if (!response.ok) {
       console.error("[ingestion-api] SDAC upload failed:", data.error);
-      throw new Error(data.error || `SDAC upload failed with status ${response.status}`);
+      const details = Array.isArray(data.details)
+        ? data.details.filter((item: unknown) => typeof item === "string")
+        : [];
+      const categoryLabelMap: Record<string, string> = {
+        wrong_file_format: "Wrong file format",
+        missing_data: "Missing required data",
+        processing_error: "Processing error",
+      };
+      const categoryLabel = typeof data.errorCategory === "string"
+        ? categoryLabelMap[data.errorCategory] || data.errorCategory
+        : "";
+      const issueSummary = data.error || "SDAC upload failed. Please verify the file format and try again.";
+      const issueHeading = categoryLabel ? `**Issue:** ${categoryLabel}` : "**Issue:** Upload problem";
+      const fixSection = details.length > 0
+        ? `\n\n**How to fix**\n${details.map((item: string) => `- ${item}`).join("\n")}`
+        : "";
+      throw new Error(`${issueHeading}\n\n${issueSummary}${fixSection}`);
     }
 
     console.log("[ingestion-api] SDAC upload successful, reportId:", data.reportId);

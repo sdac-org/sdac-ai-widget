@@ -484,8 +484,30 @@ export async function registerRoutes(
 
       if (!response.ok) {
         console.log("[routes] SDAC upload error:", responseText.substring(0, 200));
+        let parsedError: any = null;
+        try {
+          parsedError = JSON.parse(responseText);
+        } catch {
+          parsedError = null;
+        }
+
+        const upstreamMessage =
+          parsedError?.message || parsedError?.error || "SDAC upload failed. Please verify the file format and try again.";
+        const upstreamDetails = Array.isArray(parsedError?.details)
+          ? parsedError.details.filter((item: unknown) => typeof item === "string")
+          : undefined;
+        const upstreamErrorCode = typeof parsedError?.error_code === "string"
+          ? parsedError.error_code
+          : undefined;
+        const upstreamErrorCategory = typeof parsedError?.error_category === "string"
+          ? parsedError.error_category
+          : undefined;
+
         return res.status(response.status).json({
-          error: `SDAC upload failed with status ${response.status}`,
+          error: upstreamMessage,
+          errorCode: upstreamErrorCode,
+          errorCategory: upstreamErrorCategory,
+          details: upstreamDetails,
           html: responseText
         });
       }

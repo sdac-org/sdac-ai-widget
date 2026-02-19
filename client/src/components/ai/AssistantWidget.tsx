@@ -428,10 +428,20 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         }
       }
     } catch (error) {
+      const rawErrorText = error instanceof Error ? error.message : "Unknown error";
+      const hasStatusOnlyError = /sdac upload failed with status\s+\d+/i.test(rawErrorText);
+      const errorText = hasStatusOnlyError
+        ? "We couldn't process this file. Please use the standard SDAC template and verify required columns are present."
+        : rawErrorText;
+      const isValidationError =
+        hasStatusOnlyError ||
+        /invalid sdac file format|header|issue type:|missing required data|wrong file format/i.test(errorText);
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "ai",
-        content: `❌ **Upload Failed**\n\nFile: \`${file.name}\`\nError: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease check your connection and try again.`,
+        content: `❌ **Upload Failed**\n\nFile: \`${file.name}\`\n\n${errorText}\n\n${isValidationError
+          ? "Please use the SDAC cost report template with the required header row and columns."
+          : "Please check your connection and try again."}`,
       };
       addMessage(errorMsg);
     } finally {
@@ -706,6 +716,21 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     threadId: string,
     onDelta?: (delta: string) => void
   ): Promise<{ content: string | null; conversationId?: string; conversationSk?: number; turnNumber?: number; error?: string }> => {
+    const parseOptionalNumber = (value: unknown): number | undefined => {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return undefined;
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+      return undefined;
+    };
+
     // Simplified payload - backend manages conversation history
     // reportId is optional - if not provided, agent will ask user to upload a report
     const payload = {
@@ -742,122 +767,114 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         let responseTurnNumber: number | undefined;
         let errorMessage: string | undefined;
 
+        const processEventBlock = (eventBlock: string) => {
+          const normalizedEventBlock = eventBlock.replace(/\r\n/g, "\n").trim();
+          if (!normalizedEventBlock) return;
+
+          const lines = normalizedEventBlock.split("\n");
+          let eventType = "";
+          let eventData = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim();
+            } else if (line.startsWith("data:")) {
+              eventData = line.slice(5).trim();
+            }
+          }
+
+          if (!eventData || eventData === "[DONE]") return;
+
+          try {
+            const json = JSON.parse(eventData);
+
+            switch (eventType) {
+              case "metadata":
+                responseConversationId = json.conversationId;
+                responseConversationSk = parseOptionalNumber(json.conversationSk) ?? responseConversationSk;
+                responseTurnNumber = parseOptionalNumber(json.turnNumber) ?? responseTurnNumber;
+                break;
+
+              case "delta":
+                if (json.content) {
+                  fullText += json.content;
+                  onDelta?.(json.content);
+                }
+                break;
+
+              case "tool-start":
+                setActiveTools(prev => {
+                  const next = new Map(prev);
+                  next.set(json.toolCallId, {
+                    toolCallId: json.toolCallId,
+                    toolName: json.toolName,
+                    displayName: json.displayName,
+                    startTime: Date.now(),
+                  });
+                  return next;
+                });
+                break;
+
+              case "tool-result":
+                setActiveTools(prev => {
+                  const next = new Map(prev);
+                  next.delete(json.toolCallId);
+                  return next;
+                });
+                break;
+
+              case "error":
+                errorMessage = json.message || "An error occurred";
+                break;
+
+              case "usage":
+                break;
+
+              case "done":
+                responseConversationSk = parseOptionalNumber(json.conversationSk) ?? responseConversationSk;
+                responseTurnNumber = parseOptionalNumber(json.turnNumber) ?? responseTurnNumber;
+                setActiveTools(new Map());
+                break;
+
+              default:
+                const parsed = extractStreamData(eventData);
+                if (parsed.delta) {
+                  fullText += parsed.delta;
+                  onDelta?.(parsed.delta);
+                }
+                if (parsed.conversationId) {
+                  responseConversationId = parsed.conversationId;
+                }
+                if (parsed.conversationSk !== undefined) {
+                  responseConversationSk = parsed.conversationSk;
+                }
+                if (parsed.turnNumber !== undefined) {
+                  responseTurnNumber = parsed.turnNumber;
+                }
+            }
+          } catch {
+            if (eventData !== "[DONE]") {
+              fullText += eventData;
+              onDelta?.(eventData);
+            }
+          }
+        };
+
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
 
-          const events = buffer.split("\n\n");
+          const normalizedBuffer = buffer.replace(/\r\n/g, "\n");
+          const events = normalizedBuffer.split("\n\n");
           buffer = events.pop() ?? "";
 
           for (const eventBlock of events) {
-            // Parse named SSE events (event: type\ndata: {...})
-            const lines = eventBlock.split("\n");
-            let eventType = "";
-            let eventData = "";
-
-            for (const line of lines) {
-              if (line.startsWith("event:")) {
-                eventType = line.slice(6).trim();
-              } else if (line.startsWith("data:")) {
-                eventData = line.slice(5).trim();
-              }
-            }
-
-            if (!eventData) continue;
-            if (eventData.trim() === "[DONE]") break;
-
-            try {
-              const json = JSON.parse(eventData);
-
-              switch (eventType) {
-                case "metadata":
-                  // Store conversation metadata from server
-                  responseConversationId = json.conversationId;
-                  if (typeof json.conversationSk === "number") {
-                    responseConversationSk = json.conversationSk;
-                  }
-                  if (typeof json.turnNumber === "number") {
-                    responseTurnNumber = json.turnNumber;
-                  }
-                  break;
-
-                case "delta":
-                  // Stream text content
-                  if (json.content) {
-                    fullText += json.content;
-                    onDelta?.(json.content);
-                  }
-                  break;
-
-                case "tool-start":
-                  // Tool execution started
-                  setActiveTools(prev => {
-                    const next = new Map(prev);
-                    next.set(json.toolCallId, {
-                      toolCallId: json.toolCallId,
-                      toolName: json.toolName,
-                      displayName: json.displayName,
-                      startTime: Date.now(),
-                    });
-                    return next;
-                  });
-                  break;
-
-                case "tool-result":
-                  // Tool execution completed
-                  setActiveTools(prev => {
-                    const next = new Map(prev);
-                    next.delete(json.toolCallId);
-                    return next;
-                  });
-                  break;
-
-                case "error":
-                  // Error from server
-                  errorMessage = json.message || "An error occurred";
-                  break;
-
-                case "usage":
-                  break;
-
-                case "done":
-                  if (typeof json.conversationSk === "number") {
-                    responseConversationSk = json.conversationSk;
-                  }
-                  if (typeof json.turnNumber === "number") {
-                    responseTurnNumber = json.turnNumber;
-                  }
-                  // Clear any remaining tool indicators
-                  setActiveTools(new Map());
-                  break;
-
-                default:
-                  // Fallback: try legacy parsing for backwards compatibility
-                  const parsed = extractStreamData(eventData);
-                  if (parsed.delta) {
-                    fullText += parsed.delta;
-                    onDelta?.(parsed.delta);
-                  }
-                  if (parsed.conversationId) {
-                    responseConversationId = parsed.conversationId;
-                  }
-                  if (parsed.conversationSk !== undefined) {
-                    responseConversationSk = parsed.conversationSk;
-                  }
-                  if (parsed.turnNumber !== undefined) {
-                    responseTurnNumber = parsed.turnNumber;
-                  }
-              }
-            } catch {
-              // If JSON parse fails, might be raw text
-              if (eventData.trim() !== "[DONE]") {
-                fullText += eventData;
-                onDelta?.(eventData);
-              }
-            }
+            processEventBlock(eventBlock);
           }
         }
+
+        processEventBlock(buffer);
 
         return {
           content: fullText || null,
@@ -1008,8 +1025,6 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       ? params.message
       : getLatestAiFeedbackTarget(params.thread);
 
-    const conversationIdFallback = sessionContext.conversationId;
-
     if (!target && isResponseScope) {
       updateMessageFeedback(params.threadId, params.message.id, (current) => ({
         ...current,
@@ -1019,7 +1034,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       return;
     }
 
-    if (!target && !conversationIdFallback) {
+    if (!target) {
       updateThreadFeedback(params.threadId, (current) => ({
         ...current,
         status: "error",
@@ -1028,19 +1043,10 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       return;
     }
 
-    const targetConversationSk = target?.conversationSk;
-    const targetTurnNumber = target?.turnNumber;
+    const targetConversationSk = target.conversationSk;
+    const targetTurnNumber = target.turnNumber;
 
-    if (isResponseScope && (!targetConversationSk || targetTurnNumber === undefined)) {
-      updateMessageFeedback(params.threadId, params.message.id, (current) => ({
-        ...current,
-        status: "error",
-        error: "Feedback metadata is missing for this response.",
-      }));
-      return;
-    }
-
-    if (!targetConversationSk && !conversationIdFallback) {
+    if (typeof targetConversationSk !== "number" || typeof targetTurnNumber !== "number") {
       if (isResponseScope) {
         updateMessageFeedback(params.threadId, params.message.id, (current) => ({
           ...current,
@@ -1120,13 +1126,13 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationSk: targetConversationSk,
-          conversationId: conversationIdFallback,
           reportId: sessionContext.reportId,
           userId: sessionContext.user.id,
           sessionId: sessionContext.sessionId,
           agentId: agentId || "sdac-coordinator-release",
           feedbackScope: params.scope,
           turnNumber: targetTurnNumber,
+          rating: 3,
           category: feedback.category,
           comment: trimmedComment,
         }),
@@ -1634,7 +1640,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                       ) : (
                         <div className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
                           <div
-                            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm ${
+                            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-base leading-relaxed shadow-sm ${
                               msg.role === "user"
                                 ? "bg-blue-600 text-white rounded-br-none"
                                 : "bg-white text-slate-800 border border-slate-100 rounded-bl-none"
@@ -1833,8 +1839,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                           title="Send conversation feedback"
                           onClick={() => {
                             const hasFeedbackTarget = !!getLatestAiFeedbackTarget(activeThread);
-                            const hasConversationFallback = !!sessionContext.conversationId;
-                            if (!hasFeedbackTarget && !hasConversationFallback) {
+                            if (!hasFeedbackTarget) {
                               updateThreadFeedback(activeThread.id, (current) => ({
                                 ...current,
                                 isOpen: false,
