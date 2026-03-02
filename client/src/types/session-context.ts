@@ -34,6 +34,9 @@ export interface SessionContext {
   /** Browser session ID - persists for tab lifetime */
   sessionId: string;
 
+  /** District ID from host page (TherapyLog data-sdac-district-id) */
+  districtId: string;
+
   /** Basic user info for personalization */
   user: UserInfo;
 
@@ -63,6 +66,7 @@ export function createSessionContext(options: {
   reportId: string;
   conversationId: string | null;
   sessionId: string;
+  districtId: string;
   user: UserInfo;
   ui?: SessionContext["ui"];
 }): SessionContext {
@@ -70,6 +74,7 @@ export function createSessionContext(options: {
     reportId: options.reportId,
     conversationId: options.conversationId,
     sessionId: options.sessionId,
+    districtId: options.districtId,
     user: options.user,
     platform: "sdac-widget",
     timestamp: new Date().toISOString(),

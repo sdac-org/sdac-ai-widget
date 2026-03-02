@@ -28,6 +28,9 @@ interface UseSessionContextOptions {
   /** Report ID (Mastra fetches report data from DB) */
   reportId: string;
 
+  /** District ID from host page */
+  districtId: string;
+
   /** User info */
   user: UserInfo;
 
@@ -78,7 +81,7 @@ interface UseSessionContextReturn {
  * ```
  */
 export function useSessionContext(options: UseSessionContextOptions): UseSessionContextReturn {
-  const { reportId, user, ui } = options;
+  const { reportId, districtId, user, ui } = options;
 
   // Session ID persists for tab lifetime
   const sessionId = useMemo(() => getOrCreateSessionId(), []);
@@ -110,10 +113,11 @@ export function useSessionContext(options: UseSessionContextOptions): UseSession
       reportId,
       conversationId,
       sessionId,
+      districtId,
       user,
       ui,
     }),
-    [reportId, conversationId, sessionId, user.name, user.role, user.id, ui?.currentView, ui?.selectedIssueId, ui?.selectedPersonnelId]
+    [reportId, conversationId, sessionId, districtId, user.name, user.role, user.id, ui?.currentView, ui?.selectedIssueId, ui?.selectedPersonnelId]
   );
 
   return {

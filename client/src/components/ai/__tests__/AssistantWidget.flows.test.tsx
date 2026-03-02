@@ -45,7 +45,7 @@ describe("AssistantWidget flows", () => {
     let callIndex = 0;
 
     server.use(
-      http.post("*/api/agent-chat", async ({ request }) => {
+      http.post("*/sdac/chat", async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown>;
         requestBodies.push(body);
         callIndex += 1;
@@ -93,7 +93,7 @@ describe("AssistantWidget flows", () => {
 
   it("resets state when starting fresh", async () => {
     server.use(
-      http.post("*/api/agent-chat", () => {
+      http.post("*/sdac/chat", () => {
         const stream = createSseStream([
           buildSseChunk("metadata", {
             conversationId: "session-reset",
@@ -127,7 +127,7 @@ describe("AssistantWidget flows", () => {
 
   it("shows validation fallback banner on API error", async () => {
     server.use(
-      http.post("*/api/validate-report", () =>
+      http.post("*/sdac/validate", () =>
         new HttpResponse(JSON.stringify({ error: "Validation failed" }), {
           status: 500,
           headers: { "Content-Type": "application/json" },
@@ -145,7 +145,7 @@ describe("AssistantWidget flows", () => {
 
   it("runs evaluate issues and shows overview", async () => {
     server.use(
-      http.post("*/api/validate-report", () =>
+      http.post("*/sdac/validate", () =>
         HttpResponse.json({
           reportId: REPORT_ID,
           districtName: "North Valley",
@@ -184,7 +184,7 @@ describe("AssistantWidget flows", () => {
     let requestBody: Record<string, unknown> | null = null;
 
     server.use(
-      http.post("*/api/agent-chat", async ({ request }) => {
+      http.post("*/sdac/chat", async ({ request }) => {
         requestBody = (await request.json()) as Record<string, unknown>;
 
         const stream = createSseStream([
@@ -215,7 +215,7 @@ describe("AssistantWidget flows", () => {
 
   it("shows tool progress indicators during streaming", async () => {
     server.use(
-      http.post("*/api/agent-chat", () => {
+      http.post("*/sdac/chat", () => {
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           start(controller) {
@@ -263,7 +263,7 @@ describe("AssistantWidget flows", () => {
 
   it("shows a friendly error when the stream returns an error event", async () => {
     server.use(
-      http.post("*/api/agent-chat", () => {
+      http.post("*/sdac/chat", () => {
         const stream = createSseStream([
           buildSseChunk("error", { message: "Mastra failed" }),
           buildSseChunk("done", { success: false }),
@@ -288,7 +288,7 @@ describe("AssistantWidget flows", () => {
 
   it("handles non-stream responses and persists conversationId", async () => {
     server.use(
-      http.post("*/api/agent-chat", () =>
+      http.post("*/sdac/chat", () =>
         HttpResponse.json({
           response: "Plain reply",
           conversationId: "session-3",

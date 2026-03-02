@@ -23,19 +23,31 @@
       - generic [ref=e28]:
         - generic [ref=e29]:
           - img [ref=e31]
-          - paragraph [ref=e37]: I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.
-        - generic [ref=e40]: Check variance
-        - generic [ref=e41]:
-          - img [ref=e43]
-          - generic [ref=e46]:
-            - paragraph [ref=e49]: Playwright response
-            - generic [ref=e50]:
-              - button "Helpful" [ref=e51]:
-                - img [ref=e52]
-              - button "Not helpful" [ref=e54]:
-                - img [ref=e55]
-      - generic [ref=e58]:
-        - textbox "Ask anything..." [ref=e59]
-        - button [disabled] [ref=e60]:
-          - img [ref=e61]
+          - paragraph [ref=e38]: I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.
+        - generic [ref=e41]: Check variance
+        - generic [ref=e42]:
+          - img [ref=e44]
+          - generic [ref=e47]:
+            - paragraph [ref=e51]: Playwright response
+            - generic [ref=e52]:
+              - button "Send feedback" [ref=e53]
+              - generic [ref=e54]:
+                - combobox [ref=e55]:
+                  - option "Select category"
+                  - option "accuracy"
+                  - option "clarity" [selected]
+                  - option "relevance"
+                  - option "helpfulness"
+                  - option "tone"
+                  - option "other"
+                - textbox "What went wrong?" [ref=e56]: Needs clearer recommendation
+                - button "Send" [active] [ref=e57]
+                - button "Cancel" [ref=e58]
+              - generic [ref=e59]: Report ID is missing for this session.
+      - generic [ref=e60]:
+        - button "Conversation feedback" [ref=e62]
+        - generic [ref=e63]:
+          - textbox "Ask anything..." [ref=e64]
+          - button [disabled] [ref=e65]:
+            - img [ref=e66]
 ```

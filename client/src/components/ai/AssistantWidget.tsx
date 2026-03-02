@@ -26,6 +26,9 @@ import {
   isExcelFile
 } from "@/lib/ingestion-api";
 import { useSessionContext, saveUploadedReportId, getUploadedReportId, clearUploadedReportId, clearConversationId } from "@/hooks/useSessionContext";
+import { getHostPageContext } from "@/hooks/useHostPageContext";
+import { useServerSession } from "@/hooks/useServerSession";
+import { getIngestionApiUrl } from "@/lib/api-config";
 import { SuggestedActions } from "./components/SuggestedActions";
 import { MessageRenderer } from "@/renderers";
 import type { Feature } from "@/features";
@@ -241,10 +244,11 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
       if (isExcel) {
         // Use SDAC upload for Excel files (uploads to Blob Storage)
-        // Get user info from environment (sessionContext may not be available in closure)
-        const userEmail = (import.meta.env.VITE_DEMO_USER_EMAIL as string) || "demo@example.com";
-        const userName = (import.meta.env.VITE_DEMO_USER_NAME as string) || "Demo User";
-        const district = (import.meta.env.VITE_DEMO_DISTRICT as string) || "Demo District";
+        // Get user info from host page context
+        const uploadContext = getHostPageContext();
+        const userEmail = uploadContext.userEmail || "demo@example.com";
+        const userName = uploadContext.userName || "Demo User";
+        const district = uploadContext.districtId || "Demo District";
 
         console.log("[AssistantWidget] Uploading SDAC report:", file.name);
         const result = await uploadSdacReport({
@@ -540,13 +544,25 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     }
   };
 
+  const hostContext = getHostPageContext();
+
   const { context: sessionContext, setConversationId, clearConversation } = useSessionContext({
     reportId: activeReportId,
+    districtId: hostContext.districtId,
     user: {
-      id: (import.meta.env.VITE_DEMO_USER_ID as string) || "demo-user",
-      name: (import.meta.env.VITE_DEMO_USER_NAME as string) || "Demo User",
-      role: (import.meta.env.VITE_DEMO_USER_ROLE as string) || "District Admin",
+      id: hostContext.userId,
+      name: hostContext.userName,
+      role: hostContext.userRole,
     },
+  });
+
+  // Initialize server-side session (non-blocking -- widget works without it)
+  useServerSession({
+    districtId: hostContext.districtId,
+    userId: hostContext.userId,
+    userName: hostContext.userName,
+    userEmail: hostContext.userEmail,
+    userRole: hostContext.userRole,
   });
 
   useEffect(() => {
@@ -563,7 +579,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
     try {
       // Fetch real validation data from Mastra
-      const response = await fetch("/api/validate-report", {
+      const response = await fetch(`${getIngestionApiUrl()}/sdac/validate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reportId: sessionContext.reportId }),
@@ -741,10 +757,11 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       stream: true,
       ...(sessionContext.conversationId && { conversationId: sessionContext.conversationId }),
       ...(sessionContext.reportId && { reportId: sessionContext.reportId }),
+      ...(sessionContext.districtId && { districtId: sessionContext.districtId }),
     };
 
     try {
-      const response = await fetch("/api/agent-chat", {
+      const response = await fetch(`${getIngestionApiUrl()}/sdac/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -1121,7 +1138,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     }
 
     try {
-      const response = await fetch("/api/sdac/feedback", {
+      const response = await fetch(`${getIngestionApiUrl()}/sdac/feedback`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

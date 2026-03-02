@@ -40,7 +40,7 @@ const mockAgentChat = (payload: { conversationSk?: number; turnNumber: number; c
   ]);
 
   server.use(
-    http.post("*/api/agent-chat", () =>
+    http.post("*/sdac/chat", () =>
       new HttpResponse(stream, {
         headers: { "Content-Type": "text/event-stream" },
       })
@@ -63,7 +63,7 @@ const mockAgentChatWithFinalDoneBuffer = (payload: { conversationSk: number; tur
   ]);
 
   server.use(
-    http.post("*/api/agent-chat", () =>
+    http.post("*/sdac/chat", () =>
       new HttpResponse(stream, {
         headers: { "Content-Type": "text/event-stream" },
       })
@@ -86,7 +86,7 @@ const mockAgentChatWithStringConversationSk = (payload: { conversationSk: string
   ]);
 
   server.use(
-    http.post("*/api/agent-chat", () =>
+    http.post("*/sdac/chat", () =>
       new HttpResponse(stream, {
         headers: { "Content-Type": "text/event-stream" },
       })
@@ -95,7 +95,7 @@ const mockAgentChatWithStringConversationSk = (payload: { conversationSk: string
 };
 
 const mockFeedback = (handler: (request: Request) => HttpResponse) => {
-  server.use(http.post("*/api/sdac/feedback", ({ request }) => handler(request)));
+  server.use(http.post("*/sdac/feedback", ({ request }) => handler(request)));
 };
 
 const getFeedbackScope = async (responseText: RegExp) => {
@@ -152,7 +152,7 @@ describe("AssistantWidget feedback", () => {
     );
 
     server.events.on("request:end", async ({ request }) => {
-      if (request.url.endsWith("/api/sdac/feedback")) {
+      if (request.url.endsWith("/sdac/feedback")) {
         feedbackBody = (await request.json()) as Record<string, unknown>;
       }
     });
@@ -207,7 +207,7 @@ describe("AssistantWidget feedback", () => {
     );
 
     server.events.on("request:end", async ({ request }) => {
-      if (request.url.endsWith("/api/sdac/feedback")) {
+      if (request.url.endsWith("/sdac/feedback")) {
         feedbackBody = (await request.json()) as Record<string, unknown>;
       }
     });
@@ -253,7 +253,7 @@ describe("AssistantWidget feedback", () => {
     );
 
     server.events.on("request:end", async ({ request }) => {
-      if (request.url.endsWith("/api/sdac/feedback")) {
+      if (request.url.endsWith("/sdac/feedback")) {
         feedbackBody = (await request.json()) as Record<string, unknown>;
       }
     });
@@ -306,7 +306,7 @@ describe("AssistantWidget feedback", () => {
     );
 
     server.events.on("request:end", async ({ request }) => {
-      if (request.url.endsWith("/api/sdac/feedback")) {
+      if (request.url.endsWith("/sdac/feedback")) {
         feedbackBody = (await request.json()) as Record<string, unknown>;
       }
     });
@@ -367,7 +367,7 @@ describe("AssistantWidget feedback", () => {
     );
 
     server.events.on("request:end", async ({ request }) => {
-      if (request.url.endsWith("/api/sdac/feedback")) {
+      if (request.url.endsWith("/sdac/feedback")) {
         feedbackBody = (await request.json()) as Record<string, unknown>;
       }
     });

@@ -2,8 +2,15 @@
   const SCRIPT_ID = 'sdac-assistant-script';
   if (document.getElementById(SCRIPT_ID)) return;
 
-  // Configuration
-  const WIDGET_URL = new URL(document.currentScript.src).origin + '/#/widget';
+  // Configuration -- read host page context from DOM
+  var scriptOrigin = new URL(document.currentScript.src).origin;
+  var districtEl = document.querySelector('[data-sdac-district-id]');
+  var districtId = districtEl ? districtEl.getAttribute('data-sdac-district-id') : '';
+
+  // Build iframe URL with host page context (query params BEFORE hash)
+  var widgetUrl = new URL(scriptOrigin + '/');
+  if (districtId) widgetUrl.searchParams.set('districtId', districtId);
+  var WIDGET_URL = widgetUrl.toString() + '#/widget';
   
   // Create Launcher Button
   const launcher = document.createElement('div');

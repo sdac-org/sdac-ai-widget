@@ -1,4 +1,5 @@
 const SESSION_ID_KEY = "sdac-session-id";
+const SERVER_SESSION_ID_KEY = "sdac-server-session-id";
 const CONVERSATION_KEY_PREFIX = "sdac-conversation-";
 const UPLOADED_REPORT_ID_KEY = "sdac-uploaded-report-id";
 
@@ -47,8 +48,25 @@ export function clearUploadedReportId(): void {
   sessionStorage.removeItem(UPLOADED_REPORT_ID_KEY);
 }
 
+/** Server-managed session ID (from Ingestion Server) */
+export function getServerSessionId(): string | null {
+  return sessionStorage.getItem(SERVER_SESSION_ID_KEY);
+}
+
+export function saveServerSessionId(sessionId: string): void {
+  if (!sessionId) return;
+  sessionStorage.setItem(SERVER_SESSION_ID_KEY, sessionId);
+}
+
+export function clearServerSessionId(): void {
+  sessionStorage.removeItem(SERVER_SESSION_ID_KEY);
+}
+
 export const sessionManager = {
   getOrCreateSessionId,
+  getServerSessionId,
+  saveServerSessionId,
+  clearServerSessionId,
   getConversationId,
   saveConversationId,
   clearConversationId,
