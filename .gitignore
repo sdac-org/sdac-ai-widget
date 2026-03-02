@@ -13,4 +13,12 @@ vite.config.ts.*
 # (contains only public cloud URLs, no secrets)
 !.env.replit
 
+# Claude Code
 .claude/*
+tmpclaude-*
+
+# Ralph Loop
+.ralph/.tmp/
+.ralph/.runs/
+.ralph/.activity.log
+.ralph/.errors.log

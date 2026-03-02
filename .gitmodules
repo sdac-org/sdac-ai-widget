@@ -1,0 +1,3 @@
+[submodule ".agents/ralph"]
+	path = .agents/ralph
+	url = https://github.com/Machenta/Ralph_Loops.git
