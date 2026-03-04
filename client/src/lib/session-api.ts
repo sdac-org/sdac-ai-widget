@@ -12,6 +12,7 @@ export interface SessionResponse {
   district_id: string;
   expires_at: string;
   is_new: boolean;
+  report_id?: string | null;
   user_id?: string | null;
   user_email?: string | null;
   user_name?: string | null;

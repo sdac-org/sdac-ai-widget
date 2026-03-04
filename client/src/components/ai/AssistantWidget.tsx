@@ -249,7 +249,6 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         const userEmail = uploadContext.userEmail || "demo@example.com";
         const userName = uploadContext.userName || "Demo User";
         const district = uploadContext.districtId || "Demo District";
-
         console.log("[AssistantWidget] Uploading SDAC report:", file.name);
         const result = await uploadSdacReport({
           file,
@@ -556,14 +555,23 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     },
   });
 
-  // Initialize server-side session (non-blocking -- widget works without it)
-  useServerSession({
+  // Initialize server-side session and resolve TherapyLog report for this district
+  const { reportId: serverReportId } = useServerSession({
     districtId: hostContext.districtId,
     userId: hostContext.userId,
     userName: hostContext.userName,
     userEmail: hostContext.userEmail,
     userRole: hostContext.userRole,
   });
+
+  // Apply server-resolved report ID if user hasn't uploaded their own
+  useEffect(() => {
+    if (!serverReportId) return;
+    const uploadedId = getUploadedReportId();
+    if (!uploadedId) {
+      setActiveReportId(serverReportId);
+    }
+  }, [serverReportId]);
 
   useEffect(() => {
     if (scrollRef.current) {

@@ -29,7 +29,7 @@ export function getHostPageContext(): HostPageContext {
   const params = new URLSearchParams(window.location.search);
 
   return {
-    districtId: params.get("districtId") || "",
+    districtId: params.get("districtId") || import.meta.env.VITE_DEMO_DISTRICT_ID || "",
     userId: params.get("userId") || import.meta.env.VITE_DEMO_USER_ID || "demo-user",
     userName: params.get("userName") || import.meta.env.VITE_DEMO_USER_NAME || "Demo User",
     userEmail: params.get("userEmail") || import.meta.env.VITE_DEMO_USER_EMAIL || "",

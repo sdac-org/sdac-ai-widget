@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { createSession, validateSession } from "@/lib/session-api";
+import { createSession } from "@/lib/session-api";
 import {
   getServerSessionId,
   saveServerSessionId,
@@ -29,6 +29,8 @@ interface UseServerSessionOptions {
 interface UseServerSessionReturn {
   /** Server session ID (null until initialized) */
   serverSessionId: string | null;
+  /** Report ID resolved from TherapyLog sync (null if unavailable) */
+  reportId: string | null;
   /** Whether the session is being initialized */
   isInitializing: boolean;
   /** Error message if session creation failed */
@@ -40,6 +42,7 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
   const [serverSessionId, setServerSessionId] = useState<string | null>(
     () => getServerSessionId()
   );
+  const [reportId, setReportId] = useState<string | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initRef = useRef(false);
@@ -53,20 +56,11 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
       setError(null);
 
       try {
-        // Check if we have an existing server session
-        const existingId = getServerSessionId();
-        if (existingId) {
-          const session = await validateSession(existingId);
-          if (session) {
-            setServerSessionId(session.session_id);
-            setIsInitializing(false);
-            return;
-          }
-          // Session expired or invalid, clear and create new
-          clearServerSessionId();
-        }
+        // Always call createSession on page load.
+        // The server handles deduplication: if an active session exists for
+        // (districtId, userId) it returns it; otherwise it creates a new one.
+        clearServerSessionId();
 
-        // Create new session
         const session = await createSession({
           districtId,
           userId,
@@ -77,6 +71,10 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
 
         saveServerSessionId(session.session_id);
         setServerSessionId(session.session_id);
+
+        if (session.report_id) {
+          setReportId(session.report_id);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Session creation failed";
         console.warn("[useServerSession] Session init failed:", msg);
@@ -90,5 +88,5 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
     init();
   }, [districtId, userId, userName, userEmail, userRole]);
 
-  return { serverSessionId, isInitializing, error };
+  return { serverSessionId, reportId, isInitializing, error };
 }

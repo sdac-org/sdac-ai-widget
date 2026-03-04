@@ -3,13 +3,23 @@
   if (document.getElementById(SCRIPT_ID)) return;
 
   // Configuration -- read host page context from DOM
+  // All attributes live on the same element that carries data-sdac-district-id.
   var scriptOrigin = new URL(document.currentScript.src).origin;
-  var districtEl = document.querySelector('[data-sdac-district-id]');
-  var districtId = districtEl ? districtEl.getAttribute('data-sdac-district-id') : '';
+  var contextEl = document.querySelector('[data-sdac-district-id]');
+
+  var districtId = contextEl ? contextEl.getAttribute('data-sdac-district-id') : '';
+  var userId     = contextEl ? contextEl.getAttribute('data-sdac-user-id') : '';
+  var userName   = contextEl ? contextEl.getAttribute('data-sdac-user-name') : '';
+  var userEmail  = contextEl ? contextEl.getAttribute('data-sdac-user-email') : '';
+  var userRole   = contextEl ? contextEl.getAttribute('data-sdac-user-role') : '';
 
   // Build iframe URL with host page context (query params BEFORE hash)
   var widgetUrl = new URL(scriptOrigin + '/');
   if (districtId) widgetUrl.searchParams.set('districtId', districtId);
+  if (userId)     widgetUrl.searchParams.set('userId', userId);
+  if (userName)   widgetUrl.searchParams.set('userName', userName);
+  if (userEmail)  widgetUrl.searchParams.set('userEmail', userEmail);
+  if (userRole)   widgetUrl.searchParams.set('userRole', userRole);
   var WIDGET_URL = widgetUrl.toString() + '#/widget';
   
   // Create Launcher Button
