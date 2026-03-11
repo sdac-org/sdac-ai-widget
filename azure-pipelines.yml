@@ -55,7 +55,7 @@ variables:
   VITE_DEMO_USER_EMAIL: demo@example.com
 
 pool:
-  vmImage: ubuntu-latest
+  name: Default
 
 stages:
 # ======================= Build =======================
