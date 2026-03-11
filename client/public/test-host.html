@@ -87,30 +87,42 @@
   <h1>SDAC Widget -- Host Page Test</h1>
   <p class="subtitle">
     Simulates TherapyLog embedding the widget. Edit the fields below, then click
-    "Load Widget" to inject embed.js with the configured data attributes.
+    "Load Widget" to inject embed.js with the configured page metadata.
   </p>
 
   <div class="config-panel">
-    <h2>Host Page Context (data-sdac-* attributes)</h2>
+    <h2>Host Page Context (data-sdac payload)</h2>
 
     <div class="field">
-      <label>data-sdac-district-id</label>
+      <label>district_id</label>
       <input id="cfg-district-id" value="138" />
     </div>
     <div class="field">
-      <label>data-sdac-user-id</label>
+      <label>district-name</label>
+      <input id="cfg-district-name" value="Adrian-II" />
+    </div>
+    <div class="field">
+      <label>quarter</label>
+      <input id="cfg-quarter" value="5" />
+    </div>
+    <div class="field">
+      <label>year</label>
+      <input id="cfg-year" value="2025" />
+    </div>
+    <div class="field">
+      <label>user_id</label>
       <input id="cfg-user-id" value="john@example.com" />
     </div>
     <div class="field">
-      <label>data-sdac-user-name</label>
+      <label>user_name</label>
       <input id="cfg-user-name" value="John Doe" />
     </div>
     <div class="field">
-      <label>data-sdac-user-email</label>
+      <label>user_email</label>
       <input id="cfg-user-email" value="john@example.com" />
     </div>
     <div class="field">
-      <label>data-sdac-user-role</label>
+      <label>user_role</label>
       <input id="cfg-user-role" value="District Admin" />
     </div>
     <div class="actions">
@@ -123,10 +135,10 @@
 
   <div class="note">
     <strong>How it works:</strong> Clicking "Load Widget" creates a hidden
-    &lt;div&gt; with the data attributes above, then injects embed.js. The script
-    reads the attributes, builds an iframe URL with query params, and renders the
-    launcher button in the bottom-right corner. This is the same flow TherapyLog
-    uses in production.
+    &lt;div id="sdac-meta-data" data-sdac="..."&gt;, then injects embed.js. The
+    script reads the metadata payload, builds an iframe URL with query params,
+    and renders the launcher button in the bottom-right corner. This matches the
+    page-driven embedding flow.
   </div>
 
   <!-- The context element and embed script are injected dynamically below -->
@@ -136,15 +148,20 @@
       // Remove previous injection if any
       resetWidget();
 
-      // Create the context element with data attributes (same as TherapyLog would)
+      // Create the metadata element with the consolidated data-sdac payload.
       var ctx = document.createElement('div');
-      ctx.id = 'sdac-context';
+      ctx.id = 'sdac-meta-data';
       ctx.style.display = 'none';
-      ctx.setAttribute('data-sdac-district-id', document.getElementById('cfg-district-id').value);
-      ctx.setAttribute('data-sdac-user-id',     document.getElementById('cfg-user-id').value);
-      ctx.setAttribute('data-sdac-user-name',   document.getElementById('cfg-user-name').value);
-      ctx.setAttribute('data-sdac-user-email',  document.getElementById('cfg-user-email').value);
-      ctx.setAttribute('data-sdac-user-role',   document.getElementById('cfg-user-role').value);
+      ctx.setAttribute('data-sdac', JSON.stringify({
+        district_id: document.getElementById('cfg-district-id').value,
+        "district-name": document.getElementById('cfg-district-name').value,
+        quarter: document.getElementById('cfg-quarter').value,
+        year: document.getElementById('cfg-year').value,
+        user_id: document.getElementById('cfg-user-id').value,
+        user_name: document.getElementById('cfg-user-name').value,
+        user_email: document.getElementById('cfg-user-email').value,
+        user_role: document.getElementById('cfg-user-role').value
+      }));
       document.body.appendChild(ctx);
 
       // Inject embed.js (same as TherapyLog's <script src="...embed.js">)
@@ -166,9 +183,9 @@
           status.textContent =
             'Widget loaded.\n\n' +
             'Iframe URL:\n' + iframe.src + '\n\n' +
-            'Data attributes on context element:\n' +
+            'data-sdac payload:\n' +
             Array.from(ctx.attributes)
-              .filter(function(a) { return a.name.startsWith('data-sdac-'); })
+              .filter(function(a) { return a.name === 'data-sdac'; })
               .map(function(a) { return '  ' + a.name + ' = "' + a.value + '"'; })
               .join('\n');
         } else {
@@ -180,7 +197,7 @@
     function resetWidget() {
       // Remove injected elements
       var el;
-      el = document.getElementById('sdac-context');          if (el) el.remove();
+      el = document.getElementById('sdac-meta-data');        if (el) el.remove();
       el = document.getElementById('sdac-assistant-script'); if (el) el.remove();
       el = document.getElementById('sdac-launcher');         if (el) el.remove();
       el = document.getElementById('sdac-iframe-container'); if (el) el.remove();

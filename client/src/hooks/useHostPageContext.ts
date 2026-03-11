@@ -11,6 +11,12 @@
 export interface HostPageContext {
   /** District ID from TherapyLog page (data-sdac-district-id) */
   districtId: string;
+  /** District name from host page metadata */
+  districtName: string;
+  /** Quarter from host page metadata */
+  quarter: string;
+  /** Year from host page metadata */
+  year: string;
   /** User ID -- from host page attrs or env var fallback */
   userId: string;
   /** User display name */
@@ -30,6 +36,9 @@ export function getHostPageContext(): HostPageContext {
 
   return {
     districtId: params.get("districtId") || import.meta.env.VITE_DEMO_DISTRICT_ID || "",
+    districtName: params.get("districtName") || "",
+    quarter: params.get("quarter") || "",
+    year: params.get("year") || "",
     userId: params.get("userId") || import.meta.env.VITE_DEMO_USER_ID || "demo-user",
     userName: params.get("userName") || import.meta.env.VITE_DEMO_USER_NAME || "Demo User",
     userEmail: params.get("userEmail") || import.meta.env.VITE_DEMO_USER_EMAIL || "",
