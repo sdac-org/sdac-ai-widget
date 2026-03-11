@@ -2,8 +2,84 @@
   const SCRIPT_ID = 'sdac-assistant-script';
   if (document.getElementById(SCRIPT_ID)) return;
 
-  // Configuration
-  const WIDGET_URL = new URL(document.currentScript.src).origin + '/#/widget';
+  function normalizeValue(value) {
+    if (value === null || value === undefined) return '';
+    return String(value);
+  }
+
+  function readLegacyContext(contextEl) {
+    return {
+      districtId: contextEl ? contextEl.getAttribute('data-sdac-district-id') : '',
+      userId: contextEl ? contextEl.getAttribute('data-sdac-user-id') : '',
+      userName: contextEl ? contextEl.getAttribute('data-sdac-user-name') : '',
+      userEmail: contextEl ? contextEl.getAttribute('data-sdac-user-email') : '',
+      userRole: contextEl ? contextEl.getAttribute('data-sdac-user-role') : '',
+      districtName: contextEl ? contextEl.getAttribute('data-sdac-district-name') : '',
+      quarter: contextEl ? contextEl.getAttribute('data-sdac-quarter') : '',
+      year: contextEl ? contextEl.getAttribute('data-sdac-year') : '',
+    };
+  }
+
+  function parseSdacData(rawValue) {
+    if (!rawValue) return null;
+
+    var normalized = rawValue.trim();
+    if (!normalized) return null;
+
+    try {
+      return JSON.parse(normalized);
+    } catch (_) {
+      try {
+        normalized = normalized
+          .replace(/([{,]\s*)([A-Za-z_][\w-]*)(\s*:)/g, '$1"$2"$3')
+          .replace(/'/g, '"');
+
+        return JSON.parse(normalized);
+      } catch (error) {
+        console.warn('[sdac embed] Failed to parse data-sdac payload:', error);
+        return null;
+      }
+    }
+  }
+
+  function readBlobContext() {
+    var metaEl = document.getElementById('sdac-meta-data') || document.querySelector('[data-sdac]');
+    if (!metaEl) return null;
+
+    var parsed = parseSdacData(metaEl.getAttribute('data-sdac'));
+    if (!parsed) return null;
+
+    return {
+      districtId: normalizeValue(parsed.districtId || parsed.district_id || parsed['district-id']),
+      userId: normalizeValue(parsed.userId || parsed.user_id || parsed['user-id']),
+      userName: normalizeValue(parsed.userName || parsed.user_name || parsed['user-name']),
+      userEmail: normalizeValue(parsed.userEmail || parsed.user_email || parsed['user-email']),
+      userRole: normalizeValue(parsed.userRole || parsed.user_role || parsed['user-role']),
+      districtName: normalizeValue(parsed.districtName || parsed.district_name || parsed['district-name']),
+      quarter: normalizeValue(parsed.quarter),
+      year: normalizeValue(parsed.year),
+    };
+  }
+
+  // Configuration -- read host page context from DOM
+  // Prefer the consolidated data-sdac payload, then fall back to legacy data-sdac-* attributes.
+  var scriptOrigin = new URL(document.currentScript.src).origin;
+  var contextEl = document.querySelector('[data-sdac-district-id]');
+  var blobContext = readBlobContext();
+  var legacyContext = readLegacyContext(contextEl);
+  var hostContext = Object.assign({}, legacyContext, blobContext || {});
+
+  // Build iframe URL with host page context (query params BEFORE hash)
+  var widgetUrl = new URL(scriptOrigin + '/');
+  if (hostContext.districtId) widgetUrl.searchParams.set('districtId', hostContext.districtId);
+  if (hostContext.userId) widgetUrl.searchParams.set('userId', hostContext.userId);
+  if (hostContext.userName) widgetUrl.searchParams.set('userName', hostContext.userName);
+  if (hostContext.userEmail) widgetUrl.searchParams.set('userEmail', hostContext.userEmail);
+  if (hostContext.userRole) widgetUrl.searchParams.set('userRole', hostContext.userRole);
+  if (hostContext.districtName) widgetUrl.searchParams.set('districtName', hostContext.districtName);
+  if (hostContext.quarter) widgetUrl.searchParams.set('quarter', hostContext.quarter);
+  if (hostContext.year) widgetUrl.searchParams.set('year', hostContext.year);
+  var WIDGET_URL = widgetUrl.toString() + '#/widget';
   
   // Create Launcher Button
   const launcher = document.createElement('div');

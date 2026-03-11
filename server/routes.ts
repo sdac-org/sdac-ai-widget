@@ -1,16 +1,22 @@
-import type { Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import type { Express, Request, Response } from "express";
+import type { Server } from "http";
 
+/**
+ * Widget Server Routes
+ *
+ * The widget calls the Ingestion Server directly for all API operations
+ * (chat, feedback, validation, uploads, sessions, costs).
+ *
+ * This Express server only serves static files and provides a health check.
+ */
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  app.get("/api/health", (_req: Request, res: Response) => {
+    return res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
-
+  console.log("[routes] Health check route registered (all API calls go direct to Ingestion Server)");
   return httpServer;
 }

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SDAC Widget - Host Page Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f1f5f9;
+      color: #1e293b;
+      padding: 24px;
+    }
+    h1 { font-size: 20px; margin-bottom: 8px; }
+    .subtitle { color: #64748b; font-size: 14px; margin-bottom: 24px; }
+    .config-panel {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      max-width: 600px;
+    }
+    .config-panel h2 {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #64748b;
+      margin-bottom: 12px;
+    }
+    .field { margin-bottom: 12px; }
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 4px;
+    }
+    .field input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: ui-monospace, monospace;
+    }
+    .field input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+    .actions { margin-top: 16px; display: flex; gap: 8px; }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-primary { background: #0f172a; color: white; }
+    .btn-primary:hover { background: #1e293b; }
+    .btn-secondary { background: #e2e8f0; color: #334155; }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .status {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      display: none;
+    }
+    .note {
+      margin-top: 24px;
+      padding: 12px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #92400e;
+      max-width: 600px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>SDAC Widget -- Host Page Test</h1>
+  <p class="subtitle">
+    Simulates TherapyLog embedding the widget. Edit the fields below, then click
+    "Load Widget" to inject embed.js with the configured page metadata.
+  </p>
+
+  <div class="config-panel">
+    <h2>Host Page Context (data-sdac payload)</h2>
+
+    <div class="field">
+      <label>district_id</label>
+      <input id="cfg-district-id" value="138" />
+    </div>
+    <div class="field">
+      <label>district-name</label>
+      <input id="cfg-district-name" value="Adrian-II" />
+    </div>
+    <div class="field">
+      <label>quarter</label>
+      <input id="cfg-quarter" value="5" />
+    </div>
+    <div class="field">
+      <label>year</label>
+      <input id="cfg-year" value="2025" />
+    </div>
+    <div class="field">
+      <label>user_id</label>
+      <input id="cfg-user-id" value="john@example.com" />
+    </div>
+    <div class="field">
+      <label>user_name</label>
+      <input id="cfg-user-name" value="John Doe" />
+    </div>
+    <div class="field">
+      <label>user_email</label>
+      <input id="cfg-user-email" value="john@example.com" />
+    </div>
+    <div class="field">
+      <label>user_role</label>
+      <input id="cfg-user-role" value="District Admin" />
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" onclick="loadWidget()">Load Widget</button>
+      <button class="btn btn-secondary" onclick="resetWidget()">Reset</button>
+    </div>
+
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="note">
+    <strong>How it works:</strong> Clicking "Load Widget" creates a hidden
+    &lt;div id="sdac-meta-data" data-sdac="..."&gt;, then injects embed.js. The
+    script reads the metadata payload, builds an iframe URL with query params,
+    and renders the launcher button in the bottom-right corner. This matches the
+    page-driven embedding flow.
+  </div>
+
+  <!-- The context element and embed script are injected dynamically below -->
+
+  <script>
+    function loadWidget() {
+      // Remove previous injection if any
+      resetWidget();
+
+      // Create the metadata element with the consolidated data-sdac payload.
+      var ctx = document.createElement('div');
+      ctx.id = 'sdac-meta-data';
+      ctx.style.display = 'none';
+      ctx.setAttribute('data-sdac', JSON.stringify({
+        district_id: document.getElementById('cfg-district-id').value,
+        "district-name": document.getElementById('cfg-district-name').value,
+        quarter: document.getElementById('cfg-quarter').value,
+        year: document.getElementById('cfg-year').value,
+        user_id: document.getElementById('cfg-user-id').value,
+        user_name: document.getElementById('cfg-user-name').value,
+        user_email: document.getElementById('cfg-user-email').value,
+        user_role: document.getElementById('cfg-user-role').value
+      }));
+      document.body.appendChild(ctx);
+
+      // Inject embed.js (same as TherapyLog's <script src="...embed.js">)
+      // NOTE: Do NOT set id='sdac-assistant-script' here -- embed.js uses that
+      // ID as a duplicate-injection guard. If the element exists before the
+      // script runs, the guard bails out and nothing loads.
+      var script = document.createElement('script');
+      script.src = '/embed.js';
+      document.body.appendChild(script);
+
+      // Show status
+      var status = document.getElementById('status');
+      status.style.display = 'block';
+
+      // Wait for iframe to appear, then show the URL
+      setTimeout(function() {
+        var iframe = document.querySelector('#sdac-iframe-container iframe');
+        if (iframe) {
+          status.textContent =
+            'Widget loaded.\n\n' +
+            'Iframe URL:\n' + iframe.src + '\n\n' +
+            'data-sdac payload:\n' +
+            Array.from(ctx.attributes)
+              .filter(function(a) { return a.name === 'data-sdac'; })
+              .map(function(a) { return '  ' + a.name + ' = "' + a.value + '"'; })
+              .join('\n');
+        } else {
+          status.textContent = 'Widget script loaded but iframe not found yet. Try clicking the launcher.';
+        }
+      }, 500);
+    }
+
+    function resetWidget() {
+      // Remove injected elements
+      var el;
+      el = document.getElementById('sdac-meta-data');        if (el) el.remove();
+      el = document.getElementById('sdac-assistant-script'); if (el) el.remove();
+      el = document.getElementById('sdac-launcher');         if (el) el.remove();
+      el = document.getElementById('sdac-iframe-container'); if (el) el.remove();
+      // Also remove the injected script tag (no ID, find by src)
+      document.querySelectorAll('script[src="/embed.js"]').forEach(function(s) { s.remove(); });
+      // Remove injected styles
+      document.querySelectorAll('style').forEach(function(s) {
+        if (s.textContent.indexOf('#sdac-launcher') !== -1) s.remove();
+      });
+      document.getElementById('status').style.display = 'none';
+    }
+  </script>
+
+</body>
+</html>
