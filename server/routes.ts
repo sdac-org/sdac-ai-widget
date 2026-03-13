@@ -17,6 +17,12 @@ export async function registerRoutes(
     return res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  console.log("[routes] Health check route registered (all API calls go direct to Ingestion Server)");
+  app.get("/api/config", (_req: Request, res: Response) => {
+    return res.json({
+      ingestionApiUrl: (process.env.INGESTION_API_URL || "").replace(/\/$/, ""),
+    });
+  });
+
+  console.log("[routes] Health check + config routes registered (all API calls go direct to Ingestion Server)");
   return httpServer;
 }
