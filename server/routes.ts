@@ -1,28 +1,25 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
+import { createIngestionProxy } from "./ingestion-proxy";
 
 /**
  * Widget Server Routes
  *
- * The widget calls the Ingestion Server directly for all API operations
- * (chat, feedback, validation, uploads, sessions, costs).
- *
- * This Express server only serves static files and provides a health check.
+ * The widget browser only talks to its own Express backend (same-origin).
+ * All Ingestion Server traffic is proxied server-to-server via /api/ingestion.
  */
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
 ): Promise<Server> {
   app.get("/api/health", (_req: Request, res: Response) => {
     return res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
-  app.get("/api/config", (_req: Request, res: Response) => {
-    return res.json({
-      ingestionApiUrl: (process.env.INGESTION_API_URL || "").replace(/\/$/, ""),
-    });
-  });
+  app.use("/api/ingestion", createIngestionProxy());
 
-  console.log("[routes] Health check + config routes registered (all API calls go direct to Ingestion Server)");
+  console.log(
+    "[routes] Health check + ingestion proxy registered (/api/ingestion -> Ingestion Server)",
+  );
   return httpServer;
 }
