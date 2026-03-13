@@ -556,7 +556,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
   });
 
   // Initialize server-side session and resolve TherapyLog report for this district
-  const { reportId: serverReportId } = useServerSession({
+  const { reportId: serverReportId, districtName: serverDistrictName, quarter: serverQuarter, year: serverYear } = useServerSession({
     districtId: hostContext.districtId,
     userId: hostContext.userId,
     userName: hostContext.userName,
@@ -757,6 +757,11 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
     // Simplified payload - backend manages conversation history
     // reportId is optional - if not provided, agent will ask user to upload a report
+    // Prefer host page context over server session values
+    const effectiveDistrictName = hostContext.districtName || serverDistrictName;
+    const effectiveQuarter = hostContext.quarter || serverQuarter;
+    const effectiveYear = hostContext.year || (serverYear != null ? String(serverYear) : null);
+
     const payload = {
       agentId,
       message: text,
@@ -766,6 +771,9 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
       ...(sessionContext.conversationId && { conversationId: sessionContext.conversationId }),
       ...(sessionContext.reportId && { reportId: sessionContext.reportId }),
       ...(sessionContext.districtId && { districtId: sessionContext.districtId }),
+      ...(effectiveDistrictName && { districtName: effectiveDistrictName }),
+      ...(effectiveQuarter && { quarter: effectiveQuarter }),
+      ...(effectiveYear && { year: effectiveYear }),
     };
 
     try {

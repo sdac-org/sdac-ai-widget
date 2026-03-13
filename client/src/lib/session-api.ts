@@ -17,6 +17,9 @@ export interface SessionResponse {
   user_email?: string | null;
   user_name?: string | null;
   user_role?: string | null;
+  district_name?: string | null;
+  quarter?: string | null;
+  year?: number | null;
 }
 
 export async function createSession(params: {

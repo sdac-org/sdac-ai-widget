@@ -31,6 +31,12 @@ interface UseServerSessionReturn {
   serverSessionId: string | null;
   /** Report ID resolved from TherapyLog sync (null if unavailable) */
   reportId: string | null;
+  /** District name resolved from server (null if unavailable) */
+  districtName: string | null;
+  /** Quarter from server session (null if unavailable) */
+  quarter: string | null;
+  /** Year from server session (null if unavailable) */
+  year: number | null;
   /** Whether the session is being initialized */
   isInitializing: boolean;
   /** Error message if session creation failed */
@@ -43,6 +49,9 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
     () => getServerSessionId()
   );
   const [reportId, setReportId] = useState<string | null>(null);
+  const [districtName, setDistrictName] = useState<string | null>(null);
+  const [quarter, setQuarter] = useState<string | null>(null);
+  const [year, setYear] = useState<number | null>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initRef = useRef(false);
@@ -75,6 +84,15 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
         if (session.report_id) {
           setReportId(session.report_id);
         }
+        if (session.district_name) {
+          setDistrictName(session.district_name);
+        }
+        if (session.quarter) {
+          setQuarter(session.quarter);
+        }
+        if (session.year != null) {
+          setYear(session.year);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Session creation failed";
         console.warn("[useServerSession] Session init failed:", msg);
@@ -88,5 +106,5 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
     init();
   }, [districtId, userId, userName, userEmail, userRole]);
 
-  return { serverSessionId, reportId, isInitializing, error };
+  return { serverSessionId, reportId, districtName, quarter, year, isInitializing, error };
 }
