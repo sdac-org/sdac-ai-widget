@@ -39,8 +39,14 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run dev:client"
+args = "npm run dev"
 waitForPort = 5000
 
 [agent]
 mockupState = "MOCKUP"
+
+[userenv]
+
+[userenv.shared]
+MASTRA_BASE_URL = "https://dev-testmastra-env-app.azurewebsites.net"
+INGESTION_API_URL = "https://ingestion-server-a7ajfqachqcpexc0.centralus-01.azurewebsites.net"

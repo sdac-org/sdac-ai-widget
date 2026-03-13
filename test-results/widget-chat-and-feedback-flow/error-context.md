@@ -1,0 +1,53 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - button [ref=e8]:
+          - img [ref=e9]
+        - generic [ref=e11]:
+          - heading "Check variance..." [level=3] [ref=e12]
+          - generic [ref=e13]: Online
+      - generic [ref=e15]:
+        - button "New Chat" [ref=e16]:
+          - img [ref=e17]
+        - button "Start Fresh (Clear All)" [ref=e18]:
+          - img [ref=e19]
+        - button "Close Widget" [ref=e22]:
+          - img [ref=e23]
+    - generic [ref=e27]:
+      - generic [ref=e28]:
+        - generic [ref=e29]:
+          - img [ref=e31]
+          - paragraph [ref=e38]: I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.
+        - generic [ref=e41]: Check variance
+        - generic [ref=e42]:
+          - img [ref=e44]
+          - generic [ref=e47]:
+            - paragraph [ref=e51]: Playwright response
+            - generic [ref=e52]:
+              - button "Send feedback" [ref=e53]
+              - generic [ref=e54]:
+                - combobox [ref=e55]:
+                  - option "Select category"
+                  - option "accuracy"
+                  - option "clarity" [selected]
+                  - option "relevance"
+                  - option "helpfulness"
+                  - option "tone"
+                  - option "other"
+                - textbox "What went wrong?" [ref=e56]: Needs clearer recommendation
+                - button "Send" [active] [ref=e57]
+                - button "Cancel" [ref=e58]
+              - generic [ref=e59]: Report ID is missing for this session.
+      - generic [ref=e60]:
+        - button "Conversation feedback" [ref=e62]
+        - generic [ref=e63]:
+          - textbox "Ask anything..." [ref=e64]
+          - button [disabled] [ref=e65]:
+            - img [ref=e66]
+```

@@ -1,0 +1,132 @@
+/**
+ * Session Context Hook
+ *
+ * Manages session context with conversation persistence.
+ * - sessionId: persists for browser tab lifetime (sessionStorage)
+ * - conversationId: persists per report for tab lifetime (sessionStorage), null for new conversations
+ *
+ * Note: Conversation IDs are now tab-scoped (sessionStorage) rather than persistent (localStorage).
+ * This ensures fresh conversations on new browser sessions and avoids stale conversation loads.
+ * Mastra owns the conversation ID - we just store what it returns.
+ */
+
+import { useMemo, useState, useCallback, useEffect } from "react";
+import { createSessionContext, type SessionContext, type UserInfo } from "@/types/session-context";
+import {
+  clearConversationId,
+  clearUploadedReportId,
+  getConversationId,
+  getOrCreateSessionId,
+  getUploadedReportId,
+  saveConversationId,
+  saveUploadedReportId,
+} from "@/lib/session-manager";
+
+export { clearConversationId, clearUploadedReportId, getUploadedReportId, saveUploadedReportId };
+
+interface UseSessionContextOptions {
+  /** Report ID (Mastra fetches report data from DB) */
+  reportId: string;
+
+  /** District ID from host page */
+  districtId: string;
+
+  /** User info */
+  user: UserInfo;
+
+  /** Current UI state */
+  ui?: SessionContext["ui"];
+}
+
+interface UseSessionContextReturn {
+  /** Session context to send to agent */
+  context: SessionContext;
+
+  /** Report ID for convenience */
+  reportId: string;
+
+  /** User info for convenience */
+  user: UserInfo;
+
+  /** Current conversation ID (null if new) */
+  conversationId: string | null;
+
+  /** Update conversation ID (call when Mastra returns a new one) */
+  setConversationId: (id: string) => void;
+
+  /** Clear conversation and start fresh */
+  clearConversation: () => void;
+
+  /** Check if this is a new conversation */
+  isNewConversation: boolean;
+}
+
+/**
+ * Hook for managing session context with conversation persistence
+ *
+ * @example
+ * ```tsx
+ * const { context, setConversationId, clearConversation } = useSessionContext({
+ *   reportId: "8201EDC2-...",
+ *   user: { id: "user@example.com", name: "John Doe", role: "District Admin" },
+ * });
+ *
+ * // After receiving response from Mastra
+ * if (response.conversationId && !context.conversationId) {
+ *   setConversationId(response.conversationId);
+ * }
+ *
+ * // To start a new conversation
+ * clearConversation();
+ * ```
+ */
+export function useSessionContext(options: UseSessionContextOptions): UseSessionContextReturn {
+  const { reportId, districtId, user, ui } = options;
+
+  // Session ID persists for tab lifetime
+  const sessionId = useMemo(() => getOrCreateSessionId(), []);
+
+  // Conversation ID persists per report in localStorage
+  const [conversationId, setConversationIdState] = useState<string | null>(
+    () => getConversationId(reportId)
+  );
+
+  useEffect(() => {
+    setConversationIdState(getConversationId(reportId));
+  }, [reportId]);
+
+  // Update conversation ID and persist to localStorage
+  const setConversationId = useCallback((id: string) => {
+    setConversationIdState(id);
+    saveConversationId(reportId, id);
+  }, [reportId]);
+
+  // Clear conversation (start fresh)
+  const clearConversation = useCallback(() => {
+    setConversationIdState(null);
+    clearConversationId(reportId);
+  }, [reportId]);
+
+  // Build the session context
+  const context = useMemo(
+    () => createSessionContext({
+      reportId,
+      conversationId,
+      sessionId,
+      districtId,
+      user,
+      ui,
+    }),
+    [reportId, conversationId, sessionId, districtId, user.name, user.role, user.id, ui?.currentView, ui?.selectedIssueId, ui?.selectedPersonnelId]
+  );
+
+  return {
+    context,
+    reportId,
+    user,
+    conversationId,
+    setConversationId,
+    clearConversation,
+    isNewConversation: conversationId === null,
+  };
+}
