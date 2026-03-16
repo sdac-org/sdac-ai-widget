@@ -12,7 +12,6 @@ services:
         VITE_DEMO_USER_EMAIL: ${VITE_DEMO_USER_EMAIL:-demo@example.com}
         VITE_DEMO_USER_ROLE: ${VITE_DEMO_USER_ROLE:-District Admin}
         VITE_DEMO_DISTRICT: ${VITE_DEMO_DISTRICT:-Demo District}
-        VITE_MASTRA_AGENT_ID: ${VITE_MASTRA_AGENT_ID:-}
     image: sdac-ai-widget:latest
     container_name: sdac-widget
     ports:
@@ -22,7 +21,7 @@ services:
       - NODE_ENV=production
       - PORT=5000
       - MASTRA_BASE_URL=${MASTRA_BASE_URL}
-      - MASTRA_AGENT_ID=${MASTRA_AGENT_ID:-SDAC_coordinator_release}
+      - MASTRA_AGENT_ID=${MASTRA_AGENT_ID:-sdac-coordinator-release}
       - INGESTION_API_URL=${INGESTION_API_URL}
     extra_hosts:
       # Allow container to access host machine services (only needed for local dev)

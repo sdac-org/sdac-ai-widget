@@ -94,7 +94,7 @@ docker compose up -d
 MASTRA_BASE_URL=https://your-mastra.azurewebsites.net
 INGESTION_API_URL=https://your-ingestion.azurewebsites.net
 HOST_PORT=80
-MASTRA_AGENT_ID=SDAC_coordinator_release
+MASTRA_AGENT_ID=sdac-coordinator-release
 ```
 
 **Deploy Widget to Azure:**
@@ -119,7 +119,7 @@ az container create \
   --environment-variables \
     MASTRA_BASE_URL=https://your-mastra.azurewebsites.net \
     INGESTION_API_URL=https://your-ingestion.azurewebsites.net \
-    MASTRA_AGENT_ID=SDAC_coordinator_release
+    MASTRA_AGENT_ID=sdac-coordinator-release
 ```
 
 Option B: **Azure App Service (Container)**
@@ -145,7 +145,7 @@ az webapp config appsettings set \
   --settings \
     MASTRA_BASE_URL=https://your-mastra.azurewebsites.net \
     INGESTION_API_URL=https://your-ingestion.azurewebsites.net \
-    MASTRA_AGENT_ID=SDAC_coordinator_release
+    MASTRA_AGENT_ID=sdac-coordinator-release
 ```
 
 ---
@@ -188,7 +188,7 @@ az webapp config appsettings set \
   --settings \
     MASTRA_BASE_URL=https://your-mastra-service.com \
     INGESTION_API_URL=https://your-ingestion-service.com \
-    MASTRA_AGENT_ID=SDAC_coordinator_release
+    MASTRA_AGENT_ID=sdac-coordinator-release
 ```
 
 ---

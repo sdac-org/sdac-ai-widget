@@ -13,3 +13,23 @@
 export function getIngestionApiUrl(): string {
   return "/api/ingestion";
 }
+
+/**
+ * Runtime server config fetched once from GET /api/config.
+ * Values come from the Express server's process.env so they can be
+ * changed via App Service settings without rebuilding the container.
+ */
+interface ServerConfig {
+  agentId: string | null;
+}
+
+let configPromise: Promise<ServerConfig> | null = null;
+
+export function getServerConfig(): Promise<ServerConfig> {
+  if (!configPromise) {
+    configPromise = fetch("/api/config")
+      .then((r) => r.json())
+      .catch(() => ({ agentId: null }));
+  }
+  return configPromise;
+}

@@ -16,6 +16,12 @@ export async function registerRoutes(
     return res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  app.get("/api/config", (_req: Request, res: Response) => {
+    return res.json({
+      agentId: process.env.MASTRA_AGENT_ID || null,
+    });
+  });
+
   app.use("/api/ingestion", createIngestionProxy());
 
   console.log(
