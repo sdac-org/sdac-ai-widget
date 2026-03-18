@@ -202,7 +202,7 @@ These can be changed without rebuilding:
 |----------|-------------|---------|
 | `MASTRA_BASE_URL` | Mastra server URL | `http://host.docker.internal:4111` |
 | `INGESTION_API_URL` | Ingestion server URL | `http://host.docker.internal:8000` |
-| `MASTRA_AGENT_ID` | Agent identifier | `SDAC_coordinator_release` |
+| `MASTRA_AGENT_ID` | Agent identifier | `sdac-coordinator-release` |
 | `HOST_PORT` | Port to expose | `5000` |
 
 ### Build-time Variables (Client-side)

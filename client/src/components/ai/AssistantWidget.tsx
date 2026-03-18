@@ -28,7 +28,7 @@ import {
 import { useSessionContext, saveUploadedReportId, getUploadedReportId, clearUploadedReportId, clearConversationId } from "@/hooks/useSessionContext";
 import { getHostPageContext } from "@/hooks/useHostPageContext";
 import { useServerSession } from "@/hooks/useServerSession";
-import { getIngestionApiUrl, getServerConfig } from "@/lib/api-config";
+import { getIngestionApiUrl } from "@/lib/api-config";
 import { SuggestedActions } from "./components/SuggestedActions";
 import { MessageRenderer } from "@/renderers";
 import type { Feature } from "@/features";
@@ -134,13 +134,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     return uploadedId || (import.meta.env.VITE_REPORT_ID as string) || "";
   });
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [agentId, setAgentId] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    getServerConfig().then((cfg) => {
-      if (cfg.agentId) setAgentId(cfg.agentId);
-    });
-  }, []);
+  const agentId = "sdac-coordinator-release";
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1168,7 +1162,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           reportId: sessionContext.reportId,
           userId: sessionContext.user.id,
           sessionId: sessionContext.sessionId,
-          agentId: agentId || "sdac-coordinator-release",
+          agentId,
           feedbackScope: params.scope,
           turnNumber: targetTurnNumber,
           rating: 3,
