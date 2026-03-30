@@ -1,115 +1,103 @@
-# SDAC AI Widget - Deployment Guide
+# SDAC AI Widget Deployment Guide
 
-This guide covers deploying the SDAC AI Widget using Docker in various scenarios.
+This guide covers deploying the SDAC AI Widget container and wiring it to the ingestion service it depends on.
 
-## Prerequisites
+## Architecture
 
-- Docker and Docker Compose installed
-- Access to Mastra and Ingestion Server URLs
+The deployed widget has two layers:
+
+1. The browser loads the widget UI from the widget container.
+2. The widget server proxies all SDAC API traffic to the ingestion service through `/api/ingestion/*`.
+
+The browser does not call upstream SDAC services directly.
+
+## Required Runtime Settings
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `INGESTION_API_URL` | Base URL of the ingestion service the widget server should proxy to | `http://host.docker.internal:8000` |
+| `SDAC_AGENT_ID` | Optional default agent ID exposed through `GET /api/config` | `sdac-coordinator-release` |
+| `HOST_PORT` | Host port for the widget container | `5000` |
 
 ## Quick Start
 
 ### 1. Configure Environment
 
-Copy the Docker environment template:
-
 ```bash
 cp .env.docker .env
 ```
 
-Edit `.env` and set your service URLs:
+Set at least:
 
 ```bash
-# For local services
-MASTRA_BASE_URL=http://host.docker.internal:4111
 INGESTION_API_URL=http://host.docker.internal:8000
-
-# For Azure services
-# MASTRA_BASE_URL=https://your-mastra.azurewebsites.net
-# INGESTION_API_URL=https://your-ingestion.azurewebsites.net
+SDAC_AGENT_ID=sdac-coordinator-release
+HOST_PORT=5000
 ```
 
 ### 2. Build and Run
 
 ```bash
-# Build the image
 docker compose build
-
-# Start the container
 docker compose up -d
-
-# Check logs
 docker compose logs -f
-
-# Access the widget
-open http://localhost:5000
 ```
 
-### 3. Stop
+### 3. Open the Widget
 
 ```bash
-docker compose down
+open http://localhost:5000
 ```
 
 ## Deployment Scenarios
 
-### Scenario 1: All Services Local (Development)
+### Scenario 1: Local Ingestion Service
 
-**Use Case:** Testing locally with all services on your machine.
+Use this for local development.
 
-**Configuration** (`.env`):
 ```bash
-MASTRA_BASE_URL=http://host.docker.internal:4111
 INGESTION_API_URL=http://host.docker.internal:8000
+SDAC_AGENT_ID=sdac-coordinator-release
 HOST_PORT=5000
 ```
 
-**Start Services:**
-```bash
-# Terminal 1: Start Mastra
-cd /path/to/mastra
-npm run dev  # or your Mastra start command
+Start the ingestion service first:
 
-# Terminal 2: Start Ingestion Server
+```bash
 cd /path/to/ingestion-server
 uvicorn ingestion_server.web.app:app --reload --port 8000
+```
 
-# Terminal 3: Start Widget
+Then start the widget:
+
+```bash
 cd /path/to/sdac-ai-widget
 docker compose up -d
 ```
 
-**Notes:**
-- `host.docker.internal` allows Docker to reach services on your host machine
-- Ensure Mastra runs on port 4111 and Ingestion Server on port 8000
+### Scenario 2: Remote Ingestion Service
 
----
+Use this when the ingestion service is already deployed elsewhere.
 
-### Scenario 2: All Services on Azure (Production)
-
-**Use Case:** Full production deployment with all services on Azure.
-
-**Configuration** (`.env`):
 ```bash
-MASTRA_BASE_URL=https://your-mastra.azurewebsites.net
-INGESTION_API_URL=https://your-ingestion.azurewebsites.net
+INGESTION_API_URL=https://your-ingestion-service.example.com
+SDAC_AGENT_ID=sdac-coordinator-release
 HOST_PORT=80
-MASTRA_AGENT_ID=sdac-coordinator-release
 ```
 
-**Deploy Widget to Azure:**
+The widget container needs network access only to the ingestion service.
 
-Option A: **Azure Container Instances**
+## Azure Deployment
+
+### Azure Container Instance
+
 ```bash
-# Build and tag image
 docker compose build
 docker tag sdac-ai-widget:latest yourregistry.azurecr.io/sdac-ai-widget:latest
 
-# Push to Azure Container Registry
 az acr login --name yourregistry
 docker push yourregistry.azurecr.io/sdac-ai-widget:latest
 
-# Create container instance
 az container create \
   --resource-group your-rg \
   --name sdac-widget \
@@ -117,240 +105,141 @@ az container create \
   --dns-name-label sdac-widget \
   --ports 5000 \
   --environment-variables \
-    MASTRA_BASE_URL=https://your-mastra.azurewebsites.net \
-    INGESTION_API_URL=https://your-ingestion.azurewebsites.net \
-    MASTRA_AGENT_ID=sdac-coordinator-release
+    INGESTION_API_URL=https://your-ingestion-service.example.com \
+    SDAC_AGENT_ID=sdac-coordinator-release
 ```
 
-Option B: **Azure App Service (Container)**
+### Azure App Service
+
 ```bash
-# Create App Service Plan
 az appservice plan create \
   --name sdac-widget-plan \
   --resource-group your-rg \
   --is-linux \
   --sku B1
 
-# Create Web App
 az webapp create \
   --resource-group your-rg \
   --plan sdac-widget-plan \
   --name sdac-widget-app \
   --deployment-container-image-name yourregistry.azurecr.io/sdac-ai-widget:latest
 
-# Configure environment variables
 az webapp config appsettings set \
   --resource-group your-rg \
   --name sdac-widget-app \
   --settings \
-    MASTRA_BASE_URL=https://your-mastra.azurewebsites.net \
-    INGESTION_API_URL=https://your-ingestion.azurewebsites.net \
-    MASTRA_AGENT_ID=sdac-coordinator-release
+    INGESTION_API_URL=https://your-ingestion-service.example.com \
+    SDAC_AGENT_ID=sdac-coordinator-release
 ```
 
----
+## Build-Time Settings
 
-### Scenario 3: Local Ingestion, Remote Mastra (Hybrid)
+These values are baked into the client bundle and require a rebuild when changed.
 
-**Use Case:** Testing with production Mastra but local ingestion server.
+| Variable | Description |
+|----------|-------------|
+| `VITE_REPORT_ID` | Optional default report ID |
+| `VITE_DEMO_USER_ID` | Demo user ID for local testing |
+| `VITE_DEMO_USER_NAME` | Demo user name |
+| `VITE_DEMO_USER_EMAIL` | Demo user email |
+| `VITE_DEMO_USER_ROLE` | Demo user role |
+| `VITE_DEMO_DISTRICT` | Demo district label |
+| `VITE_DEMO_DISTRICT_ID` | Demo district ID |
 
-**Configuration** (`.env`):
+Rebuild after changing build-time settings:
+
 ```bash
-MASTRA_BASE_URL=https://your-mastra.azurewebsites.net
-INGESTION_API_URL=http://host.docker.internal:8000
-HOST_PORT=5000
-```
-
-**Start:**
-```bash
-# Terminal 1: Start local Ingestion Server
-cd /path/to/ingestion-server
-uvicorn ingestion_server.web.app:app --reload --port 8000
-
-# Terminal 2: Start Widget (using remote Mastra)
-cd /path/to/sdac-ai-widget
-docker compose up -d
-```
-
----
-
-### Scenario 4: Widget on Azure, Services Elsewhere
-
-**Use Case:** Widget deployed to Azure, connecting to services on different infrastructure.
-
-**Configuration:**
-
-Set environment variables in Azure portal or CLI:
-```bash
-az webapp config appsettings set \
-  --resource-group your-rg \
-  --name sdac-widget-app \
-  --settings \
-    MASTRA_BASE_URL=https://your-mastra-service.com \
-    INGESTION_API_URL=https://your-ingestion-service.com \
-    MASTRA_AGENT_ID=sdac-coordinator-release
-```
-
----
-
-## Environment Variables Reference
-
-### Runtime Variables (Server-side)
-These can be changed without rebuilding:
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `MASTRA_BASE_URL` | Mastra server URL | `http://host.docker.internal:4111` |
-| `INGESTION_API_URL` | Ingestion server URL | `http://host.docker.internal:8000` |
-| `MASTRA_AGENT_ID` | Agent identifier | `sdac-coordinator-release` |
-| `HOST_PORT` | Port to expose | `5000` |
-
-### Build-time Variables (Client-side)
-These require rebuilding the image:
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `VITE_REPORT_ID` | Default report ID | `8201EDC2-...` |
-| `VITE_DEMO_USER_NAME` | Demo user name | `Demo User` |
-| `VITE_DEMO_USER_EMAIL` | Demo user email | `demo@example.com` |
-| `VITE_DEMO_DISTRICT` | Demo district | `Demo District` |
-
-**To change build-time variables:**
-```bash
-# Edit .env
-nano .env
-
-# Rebuild
 docker compose build --no-cache
 docker compose up -d
 ```
 
----
+## Connectivity Model
 
-## Networking
+- Browser to widget server: same origin, `/api/config` and `/api/ingestion/*`
+- Widget server to ingestion service: server-to-server via `INGESTION_API_URL`
+- The widget server does not require a separate base URL for the review service
 
-### Docker → Host Services
-Use `host.docker.internal` to reach services on your host machine:
+## Common Proxied Paths
+
+The browser-facing widget backend commonly proxies these same-origin routes:
+
+| Widget Path | Upstream Path | Purpose |
+|-------------|---------------|---------|
+| `/api/config` | n/a | Returns runtime widget config such as `agentId` |
+| `/api/ingestion/sdac/upload` | `/sdac/upload` | Workbook upload |
+| `/api/ingestion/sdac/ingest` | `/sdac/ingest` | Structured payload ingest |
+| `/api/ingestion/sdac/sessions` | `/sdac/sessions` | Create or resume a district session |
+| `/api/ingestion/sdac/sessions/{session_id}` | `/sdac/sessions/{session_id}` | Validate an existing session |
+| `/api/ingestion/sdac/sync` | `/sdac/sync` | Resolve or refresh the latest district report |
+| `/api/ingestion/sdac/costs` | `/sdac/costs` | List district cost records |
+| `/api/ingestion/sdac/costs/{cost_id}` | `/sdac/costs/{cost_id}` | Get cost record detail |
+| `/api/ingestion/sdac/chat` | `/sdac/chat` | Streaming chat |
+| `/api/ingestion/sdac/validate` | `/sdac/validate` | Report validation |
+| `/api/ingestion/sdac/feedback` | `/sdac/feedback` | Feedback submission |
+| `/api/ingestion/sdac/report/{report_id}` | `/sdac/report/{report_id}` | Report header metadata |
+| `/api/ingestion/sdac/reports/{report_id}` | `/sdac/reports/{report_id}` | Ingestion-side report status |
+
+## Verification
+
+### Health Check
+
 ```bash
-INGESTION_API_URL=http://host.docker.internal:8000
+curl http://localhost:5000/api/health
 ```
 
-### Docker → Docker Services
-If services are in the same Docker network, use container names:
-```bash
-INGESTION_API_URL=http://ingestion-server:8000
+Expected response:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-03-30T15:00:00.000Z"
+}
 ```
 
-### Azure → Azure Services
-Use internal service URLs when possible for better performance:
+### Config Check
+
 ```bash
-MASTRA_BASE_URL=https://your-mastra.azurewebsites.net
+curl http://localhost:5000/api/config
 ```
 
----
+Expected response:
+
+```json
+{
+  "agentId": "sdac-coordinator-release"
+}
+```
+
+### Proxy Check
+
+```bash
+curl http://localhost:5000/api/ingestion/health
+```
 
 ## Troubleshooting
 
-### Check Container Status
+### The widget loads but API requests fail
+
+Check widget logs:
+
 ```bash
-docker compose ps
 docker compose logs -f
 ```
 
-### Test Connectivity
+Confirm the ingestion service is reachable from the container:
+
 ```bash
-# From host
-curl http://localhost:5000/api/health
-
-# From inside container
-docker exec sdac-widget wget -O- http://localhost:5000/api/health
+docker exec sdac-widget wget -O- $INGESTION_API_URL/health
 ```
 
-### Connection Issues
-If ingestion/Mastra calls fail:
+### Upload or chat requests fail
 
-1. **Check URLs in logs:**
-   ```bash
-   docker compose logs | grep "Ingestion server URL"
-   docker compose logs | grep "Mastra"
-   ```
+Check:
 
-2. **Test from container:**
-   ```bash
-   docker exec sdac-widget wget -O- $MASTRA_BASE_URL/health
-   docker exec sdac-widget wget -O- $INGESTION_API_URL/
-   ```
+- `INGESTION_API_URL` points to the correct ingestion service
+- The ingestion service itself is healthy
+- The widget server can reach that host from inside the container
 
-3. **Verify environment:**
-   ```bash
-   docker exec sdac-widget env | grep -E "MASTRA|INGESTION"
-   ```
+### Agent ID is missing in the client
 
-### Rebuild from Scratch
-```bash
-docker compose down
-docker compose build --no-cache
-docker compose up -d
-```
-
----
-
-## Production Checklist
-
-- [ ] Set actual service URLs (not `host.docker.internal`)
-- [ ] Use HTTPS URLs for production services
-- [ ] Remove demo/test credentials from build args
-- [ ] Enable Azure Application Insights (if using Azure)
-- [ ] Set up proper logging and monitoring
-- [ ] Configure health checks in Azure
-- [ ] Use Azure Key Vault for secrets
-- [ ] Set up CI/CD pipeline for automated builds
-- [ ] Configure auto-scaling rules
-- [ ] Enable Azure Container Registry scanning
-
----
-
-## CI/CD Example (GitHub Actions)
-
-```yaml
-name: Build and Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Login to Azure Container Registry
-        uses: docker/login-action@v2
-        with:
-          registry: yourregistry.azurecr.io
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
-
-      - name: Build and push
-        run: |
-          docker compose build
-          docker tag sdac-ai-widget:latest yourregistry.azurecr.io/sdac-ai-widget:latest
-          docker push yourregistry.azurecr.io/sdac-ai-widget:latest
-
-      - name: Deploy to Azure
-        run: |
-          az webapp config container set \
-            --name sdac-widget-app \
-            --resource-group your-rg \
-            --docker-custom-image-name yourregistry.azurecr.io/sdac-ai-widget:latest
-```
-
----
-
-## Support
-
-For issues or questions:
-- Check logs: `docker compose logs -f`
-- Review environment: `docker exec sdac-widget env`
-- Test health: `curl http://localhost:5000/api/health`
+Set `SDAC_AGENT_ID` and restart the widget container.

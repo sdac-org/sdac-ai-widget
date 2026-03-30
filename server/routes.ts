@@ -18,7 +18,7 @@ export async function registerRoutes(
 
   app.get("/api/config", (_req: Request, res: Response) => {
     return res.json({
-      agentId: process.env.MASTRA_AGENT_ID || null,
+      agentId: process.env.SDAC_AGENT_ID || process.env.MASTRA_AGENT_ID || null,
     });
   });
 
