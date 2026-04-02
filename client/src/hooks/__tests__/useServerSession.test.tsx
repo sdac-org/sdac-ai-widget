@@ -6,6 +6,19 @@ vi.mock("@/lib/session-api", () => ({
   createSession: vi.fn(),
 }));
 
+vi.mock("@/hooks/useHostPageContext", () => ({
+  getHostPageContext: vi.fn(() => ({
+    districtId: "district-1",
+    districtName: "District One",
+    quarter: "Q2",
+    year: "2025",
+    userId: "user-1",
+    userName: "Test User",
+    userEmail: "test@example.com",
+    userRole: "admin",
+  })),
+}));
+
 vi.mock("@/lib/session-manager", () => ({
   getServerSessionId: vi.fn(() => null),
   saveServerSessionId: vi.fn(),
@@ -123,6 +136,25 @@ describe("useServerSession", () => {
 
     await waitFor(() => {
       expect(mockedSaveServerSessionId).toHaveBeenCalledWith("s1");
+    });
+  });
+
+  it("passes host quarter and year when creating the server session", async () => {
+    mockedCreateSession.mockResolvedValue({
+      ...SESSION_RESPONSE,
+      session_id: "s1",
+    });
+
+    render(<HookProbe {...BASE_PROPS} />);
+
+    await waitFor(() => {
+      expect(mockedCreateSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          districtId: "district-1",
+          quarter: "Q2",
+          year: "2025",
+        }),
+      );
     });
   });
 });

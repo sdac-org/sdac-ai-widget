@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createSession } from "@/lib/session-api";
+import { getHostPageContext } from "@/hooks/useHostPageContext";
 import {
   getServerSessionId,
   saveServerSessionId,
@@ -45,6 +46,7 @@ interface UseServerSessionReturn {
 
 export function useServerSession(options: UseServerSessionOptions): UseServerSessionReturn {
   const { districtId, userId, userName, userEmail, userRole } = options;
+  const hostContext = getHostPageContext();
   const [serverSessionId, setServerSessionId] = useState<string | null>(
     () => getServerSessionId()
   );
@@ -76,6 +78,8 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
           userName,
           userEmail,
           userRole,
+          quarter: hostContext.quarter,
+          year: hostContext.year,
         });
 
         saveServerSessionId(session.session_id);
@@ -104,7 +108,7 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
     };
 
     init();
-  }, [districtId, userId, userName, userEmail, userRole]);
+  }, [districtId, userId, userName, userEmail, userRole, hostContext.quarter, hostContext.year]);
 
   return { serverSessionId, reportId, districtName, quarter, year, isInitializing, error };
 }

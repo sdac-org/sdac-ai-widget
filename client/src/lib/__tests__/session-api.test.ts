@@ -34,6 +34,8 @@ describe("session-api", () => {
         userName: "Test",
         userEmail: "test@test.com",
         userRole: "admin",
+        quarter: "Q2",
+        year: "2025",
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
@@ -47,6 +49,8 @@ describe("session-api", () => {
             user_email: "test@test.com",
             user_name: "Test",
             user_role: "admin",
+            quarter: 2,
+            year: 2025,
           }),
         }),
       );
@@ -101,6 +105,28 @@ describe("session-api", () => {
       expect(body.user_email).toBeNull();
       expect(body.user_name).toBeNull();
       expect(body.user_role).toBeNull();
+      expect(body.quarter).toBeNull();
+      expect(body.year).toBeNull();
+    });
+
+    it("normalizes quarter and year before sending them", async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            session_id: "s1",
+            district_id: "d1",
+            expires_at: "2026-12-31T00:00:00Z",
+            is_new: true,
+          }),
+      });
+
+      await createSession({ districtId: "d1", quarter: "3", year: "2025" });
+
+      const call = mockFetch.mock.calls[0];
+      const body = JSON.parse(call[1].body);
+      expect(body.quarter).toBe(3);
+      expect(body.year).toBe(2025);
     });
   });
 

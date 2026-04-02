@@ -28,7 +28,11 @@ export async function createSession(params: {
   userEmail?: string;
   userName?: string;
   userRole?: string;
+  quarter?: string;
+  year?: string;
 }): Promise<SessionResponse> {
+  const normalizedQuarter = normalizeQuarter(params.quarter);
+  const normalizedYear = normalizeYear(params.year);
   const url = `${getIngestionApiUrl()}/sdac/sessions`;
   console.log("[session-api] Creating session for district:", params.districtId);
 
@@ -41,6 +45,8 @@ export async function createSession(params: {
       user_email: params.userEmail || null,
       user_name: params.userName || null,
       user_role: params.userRole || null,
+      quarter: normalizedQuarter,
+      year: normalizedYear,
     }),
   });
 
@@ -67,4 +73,18 @@ export async function validateSession(sessionId: string): Promise<SessionRespons
     throw new Error("Failed to validate session");
   }
   return response.json();
+}
+
+function normalizeQuarter(quarter?: string): number | null {
+  if (!quarter) return null;
+  const match = quarter.trim().match(/^Q?([1-4])$/i);
+  if (!match) return null;
+  return Number(match[1]);
+}
+
+function normalizeYear(year?: string): number | null {
+  if (!year) return null;
+  const trimmed = year.trim();
+  if (!/^\d{4}$/.test(trimmed)) return null;
+  return Number(trimmed);
 }
