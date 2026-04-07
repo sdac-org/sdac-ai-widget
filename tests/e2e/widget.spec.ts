@@ -10,8 +10,35 @@ const sseResponse = (content: string, metadata: Record<string, unknown>) =>
     `data: ${JSON.stringify({ success: true })}\n\n`,
   ].join("");
 
+const mockSessionRoute = async (page: import("@playwright/test").Page) => {
+  await page.route("**/api/ingestion/sdac/sessions", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        session_id: "test-session-001",
+        district_id: "138",
+        expires_at: "2026-12-31T00:00:00.000Z",
+        is_new: true,
+        report_id: "8201EDC2-2EDE-4CA1-AF44-D0F5AA185CDB",
+        user_id: "demo-user",
+        user_email: "demo@example.com",
+        user_name: "Demo User",
+        user_role: "District Admin",
+        district_name: "Demo District",
+        quarter: null,
+        year: null,
+      }),
+    });
+  });
+};
+
 test("chat and feedback flow", async ({ page }) => {
-  await page.route("**/api/agent-chat", async (route) => {
+  await mockSessionRoute(page);
+
+  let feedbackRequestBody: Record<string, unknown> | null = null;
+
+  await page.route("**/api/ingestion/sdac/chat", async (route) => {
     const responseBody = sseResponse("Playwright response", {
       conversationId: "session-1",
       conversationSk: 101,
@@ -24,7 +51,8 @@ test("chat and feedback flow", async ({ page }) => {
     });
   });
 
-  await page.route("**/api/sdac/feedback", async (route) => {
+  await page.route("**/api/ingestion/sdac/feedback", async (route) => {
+    feedbackRequestBody = (route.request().postDataJSON() ?? null) as Record<string, unknown> | null;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -44,11 +72,19 @@ test("chat and feedback flow", async ({ page }) => {
   await page.getByPlaceholder("What went wrong?").fill("Needs clearer recommendation");
   await page.getByRole("button", { name: /^Send$/ }).click();
 
-  await expect(page.getByText("Conversation feedback sent")).toBeVisible();
+  await expect(page.getByText("Thanks!")).toBeVisible();
+  expect(feedbackRequestBody).toMatchObject({
+    conversationSk: 101,
+    turnNumber: 3,
+    feedbackScope: "response",
+    category: "clarity",
+  });
 });
 
 test("evaluate issues flow", async ({ page }) => {
-  await page.route("**/api/validate-report", async (route) => {
+  await mockSessionRoute(page);
+
+  await page.route("**/api/ingestion/sdac/validate", async (route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -85,7 +121,9 @@ test("evaluate issues flow", async ({ page }) => {
 });
 
 test("start fresh resets the widget", async ({ page }) => {
-  await page.route("**/api/agent-chat", async (route) => {
+  await mockSessionRoute(page);
+
+  await page.route("**/api/ingestion/sdac/chat", async (route) => {
     const responseBody = sseResponse("Reset response", {
       conversationId: "session-reset",
       conversationSk: 999,
@@ -110,14 +148,16 @@ test("start fresh resets the widget", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("conversation feedback works when metadata is unavailable", async ({ page }) => {
+test("conversation feedback is blocked when metadata is unavailable", async ({ page }) => {
+  await mockSessionRoute(page);
+
   await page.addInitScript(() => {
     sessionStorage.setItem("sdac-uploaded-report-id", "8201EDC2-2EDE-4CA1-AF44-D0F5AA185CDB");
   });
 
   let feedbackRequestBody: Record<string, unknown> | null = null;
 
-  await page.route("**/api/agent-chat", async (route) => {
+  await page.route("**/api/ingestion/sdac/chat", async (route) => {
     const responseBody = sseResponse("Response without metadata", {
       conversationId: "session-no-sk",
       turnNumber: 2,
@@ -129,7 +169,7 @@ test("conversation feedback works when metadata is unavailable", async ({ page }
     });
   });
 
-  await page.route("**/api/sdac/feedback", async (route) => {
+  await page.route("**/api/ingestion/sdac/feedback", async (route) => {
     feedbackRequestBody = (route.request().postDataJSON() ?? null) as Record<string, unknown> | null;
     await route.fulfill({
       status: 200,
@@ -144,14 +184,10 @@ test("conversation feedback works when metadata is unavailable", async ({ page }
 
   await expect(page.getByText("Response without metadata")).toBeVisible();
   await page.getByRole("button", { name: /conversation feedback/i }).click();
-  await page.getByRole("combobox").selectOption("clarity");
-  await page.getByPlaceholder("What should improve?").fill("Fallback submit should work");
-  await page.getByRole("button", { name: /^Send$/ }).click();
 
-  await expect(page.getByText("Conversation feedback sent")).toBeVisible();
-  expect(feedbackRequestBody).toMatchObject({
-    conversationId: "session-no-sk",
-    feedbackScope: "conversation",
-    category: "clarity",
-  });
+  await expect(
+    page.getByText("Feedback will be available after the next assistant response is fully saved.")
+  ).toBeVisible();
+  await expect(page.getByRole("combobox")).toHaveCount(0);
+  expect(feedbackRequestBody).toBeNull();
 });

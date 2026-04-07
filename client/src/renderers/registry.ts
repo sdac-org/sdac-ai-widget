@@ -21,7 +21,7 @@ import { FringeAnalysisRenderer } from "./components/FringeAnalysisRenderer";
  * - component: React component that renders the data
  * - validate: function that validates the data structure
  */
-const renderers: Renderer[] = [
+const renderers: Array<Renderer<any>> = [
   {
     type: "text",
     component: TextRenderer,
@@ -52,7 +52,7 @@ export const rendererRegistry = {
    * @param type - The response type to find a renderer for
    * @returns The renderer or undefined if not found
    */
-  getRenderer: (type: string): Renderer | undefined => {
+  getRenderer: (type: string): Renderer<any> | undefined => {
     return renderers.find((r) => r.type === type);
   },
 
@@ -80,7 +80,7 @@ export const rendererRegistry = {
    *
    * @returns Array of renderer definitions
    */
-  getAll: (): Renderer[] => {
+  getAll: (): Array<Renderer<any>> => {
     return [...renderers];
   },
 };

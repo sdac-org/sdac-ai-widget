@@ -24,6 +24,27 @@ const setReportId = () => {
   sessionStorage.setItem("sdac-uploaded-report-id", REPORT_ID);
 };
 
+const mockSession = () => {
+  server.use(
+    http.post("*/sdac/sessions", () =>
+      HttpResponse.json({
+        session_id: "test-session-001",
+        district_id: "138",
+        expires_at: "2026-12-31T00:00:00.000Z",
+        is_new: true,
+        report_id: REPORT_ID,
+        user_id: "demo-user",
+        user_email: "demo@example.com",
+        user_name: "Demo User",
+        user_role: "District Admin",
+        district_name: "Demo District",
+        quarter: null,
+        year: null,
+      })
+    )
+  );
+};
+
 const mockAgentChat = (payload: { conversationSk?: number; turnNumber: number; content: string }) => {
   const stream = createSseStream([
     buildSseChunk("metadata", {
@@ -94,7 +115,7 @@ const mockAgentChatWithStringConversationSk = (payload: { conversationSk: string
   );
 };
 
-const mockFeedback = (handler: (request: Request) => HttpResponse) => {
+const mockFeedback = (handler: (request: Request) => Response) => {
   server.use(http.post("*/sdac/feedback", ({ request }) => handler(request)));
 };
 
@@ -126,6 +147,7 @@ describe("AssistantWidget feedback", () => {
   beforeEach(() => {
     sessionStorage.clear();
     setReportId();
+    mockSession();
   });
 
   afterEach(() => {

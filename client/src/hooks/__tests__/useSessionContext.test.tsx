@@ -7,6 +7,7 @@ const USER = { id: "demo-user", name: "Demo", role: "District Admin" } as const;
 function HookProbe({ reportId }: { reportId: string }) {
   const { conversationId, setConversationId } = useSessionContext({
     reportId,
+    districtId: "138",
     user: USER,
   });
 

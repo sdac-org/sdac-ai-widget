@@ -22,6 +22,11 @@ export interface IngestionResponse {
     year: number;
     processed_at: string | null;
   };
+  analysisStatus?: {
+    status: string;
+    reportId: string;
+    pollUrl?: string;
+  };
   html?: string;
 }
 
@@ -146,6 +151,22 @@ export async function checkSdacReportStatus(reportId: string) {
   }
   const data = await response.json();
   console.log("[ingestion-api] SDAC report status:", data.status);
+  return data;
+}
+
+/**
+ * Check SDAC analysis status
+ * Direct to Ingestion Server: GET /sdac/reports/{report_id}/analysis-status
+ */
+export async function checkSdacReportAnalysisStatus(reportId: string) {
+  console.log("[ingestion-api] Checking SDAC analysis status:", reportId);
+  const response = await fetch(`${getIngestionApiUrl()}/sdac/reports/${reportId}/analysis-status`);
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to check analysis status: ${response.status}`);
+  }
+  const data = await response.json();
+  console.log("[ingestion-api] SDAC analysis status:", data.status);
   return data;
 }
 

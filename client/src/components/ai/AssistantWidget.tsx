@@ -22,6 +22,7 @@ import {
   uploadIngestionFile,
   uploadSdacReport,
   checkIngestionJobStatus,
+  checkSdacReportAnalysisStatus,
   checkSdacReportStatus,
   isExcelFile
 } from "@/lib/ingestion-api";
@@ -34,6 +35,8 @@ import { MessageRenderer } from "@/renderers";
 import type { Feature } from "@/features";
 
 type ViewState = "main" | "analyzing" | "chat";
+
+const TOOL_STATUS_PERSIST_MS = 10_000;
 
 type Message = {
   id: string;
@@ -75,14 +78,6 @@ type Thread = {
   issueId?: number;
 };
 
-/** Active tool call being executed */
-type ActiveTool = {
-  toolCallId: string;
-  toolName: string;
-  displayName: string;
-  startTime: number;
-};
-
 /** Issue from validation API */
 type ValidationIssue = {
   id: number;
@@ -92,6 +87,12 @@ type ValidationIssue = {
   amount: number | null;
   category: string;
   recordId?: number;
+  positionLabel?: string;
+  mainRowNumber?: number | null;
+  linkedRecordIds?: number[];
+  occupants?: string[];
+  reasons?: string[];
+  confidence?: "HIGH" | "MEDIUM" | "LOW";
 };
 
 /** Validation result from API */
@@ -109,18 +110,25 @@ type ValidationResult = {
   };
 };
 
-export function AssistantWidget({ onClose }: { onClose?: () => void }) {
+export function AssistantWidget({
+  onClose,
+  toolStatusPersistMs = TOOL_STATUS_PERSIST_MS,
+}: {
+  onClose?: () => void;
+  toolStatusPersistMs?: number;
+}) {
   const [view, setView] = useState<ViewState>("main");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null);
-  const [activeTools, setActiveTools] = useState<Map<string, ActiveTool>>(new Map());
+  const [activeToolStatus, setActiveToolStatus] = useState<string | null>(null);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPreparingReport, setIsPreparingReport] = useState(false);
   // Pending file for re-ingest (when duplicate detected)
   const [pendingReIngestFile, setPendingReIngestFile] = useState<{
     file: File;
@@ -134,7 +142,27 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     return uploadedId || (import.meta.env.VITE_REPORT_ID as string) || "";
   });
   const scrollRef = useRef<HTMLDivElement>(null);
+  const toolStatusTimeoutRef = useRef<number | null>(null);
   const agentId = "sdac-coordinator-release";
+
+  const clearToolStatusTimeout = () => {
+    if (toolStatusTimeoutRef.current !== null) {
+      window.clearTimeout(toolStatusTimeoutRef.current);
+      toolStatusTimeoutRef.current = null;
+    }
+  };
+
+  const scheduleToolStatusFallback = () => {
+    clearToolStatusTimeout();
+    toolStatusTimeoutRef.current = window.setTimeout(() => {
+      setActiveToolStatus(null);
+      toolStatusTimeoutRef.current = null;
+    }, toolStatusPersistMs);
+  };
+
+  useEffect(() => () => {
+    clearToolStatusTimeout();
+  }, []);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -159,19 +187,13 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     let targetThreadId = activeThreadId;
     if (!targetThreadId) {
       if (view === "main") {
-        createGeneralThread();
-        // We need to wait for state update or find the new thread ID. 
-        // For simplicity in this async handler, let's just use the ID we know we'd create or default to "general"
-        // Actually, createGeneralThread updates state. We might need to duplicate that logic locally or 
-        // just handle the upload and let the user see the result in the new thread.
-        // A better approach: Just switch view to chat and create a temporary thread if needed.
         const newThreadId = `general-${Date.now()}`;
-         const newThread: Thread = {
+        const newThread: Thread = {
           id: newThreadId,
           title: "File Upload",
           type: "general",
           lastMessageAt: new Date(),
-          messages: [{ id: "welcome", role: "ai", content: "I'm processing your file upload..." }],
+          messages: [],
         };
         setThreads((prev) => [newThread, ...prev]);
         setActiveThreadId(newThreadId);
@@ -182,12 +204,11 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
 
     if (!targetThreadId) return;
 
-    // Show uploading message
-    const uploadMsgId = Date.now().toString();
-    const uploadMsg: Message = {
-      id: uploadMsgId,
-      role: "user",
-      content: `Uploading file: ${file.name}...`,
+    const statusMsgId = Date.now().toString();
+    const uploadStatusMsg: Message = {
+      id: statusMsgId,
+      role: "ai",
+      content: `📤 **Uploading File**\n\nPreparing \`${file.name}\` for upload and analysis...`,
     };
 
     setThreads((prev) =>
@@ -195,7 +216,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         if (t.id === targetThreadId) {
           return {
             ...t,
-            messages: [...t.messages, uploadMsg],
+            messages: [...t.messages, uploadStatusMsg],
             lastMessageAt: new Date(),
           };
         }
@@ -239,7 +260,6 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     };
 
     try {
-      const statusMsgId = (Date.now() + 1).toString();
       const isExcel = isExcelFile(file);
 
       if (isExcel) {
@@ -248,7 +268,10 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         const uploadContext = getHostPageContext();
         const userEmail = uploadContext.userEmail || "demo@example.com";
         const userName = uploadContext.userName || "Demo User";
-        const district = uploadContext.districtId || "Demo District";
+        const district =
+          uploadContext.districtName ||
+          uploadContext.districtId ||
+          "Demo District";
         console.log("[AssistantWidget] Uploading SDAC report:", file.name);
         const result = await uploadSdacReport({
           file,
@@ -270,11 +293,10 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
             ? `\nDistrict: \`${result.existingReport.district}\`\nQuarter: \`${result.existingReport.quarter} ${result.existingReport.year}\``
             : "";
           
-          addMessage({
-            id: statusMsgId,
-            role: "ai",
-            content: `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`${existingInfo}\n\nThis file has been uploaded before.\n\n**Option 1:** Use existing report (recommended)\n**Option 2:** Re-ingest as new report\n\nUse the button below to re-ingest, or continue chatting to use the existing report.`,
-          });
+          updateMessage(
+            statusMsgId,
+            `📋 **File Already Uploaded**\n\nFile: \`${file.name}\`${existingInfo}\n\nThis file has been uploaded before.\n\n**Option 1:** Use existing report (recommended)\n**Option 2:** Re-ingest as new report\n\nUse the button below to re-ingest, or continue chatting to use the existing report.`
+          );
           
           // Store file info for potential re-ingest
           setPendingReIngestFile({ file, userEmail, userName, district });
@@ -284,55 +306,56 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         
         // Handle simple duplicate (no re-ingest option) - backwards compatibility
         if (result.isDuplicate) {
-          addMessage({
-            id: statusMsgId,
-            role: "ai",
-            content: `📋 **Report Already Exists**\n\nFile: \`${file.name}\`\n\nThis file has already been uploaded. Using the existing report data. You can now run validation analysis.`,
-          });
+          updateMessage(
+            statusMsgId,
+            `📋 **Report Already Added**\n\nFile: \`${file.name}\`\n\nThis file is already available. You can start reviewing it now.`
+          );
           setIsUploading(false);
           return;
         }
 
         // Initial success message with report ID
-        addMessage({
-          id: statusMsgId,
-          role: "ai",
-          content: `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Processing... Uploading to storage and analyzing...`,
-        });
+        updateMessage(
+          statusMsgId,
+          `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Upload complete. Starting analysis...`
+        );
 
-        // Poll SDAC report status if we have a reportId
+        // Poll SDAC analysis status if we have a reportId
         if (result.reportId) {
+          setIsPreparingReport(true);
+          setIsUploading(false);
           let attempts = 0;
-          const maxAttempts = 60; // Poll for up to 60 seconds (SDAC processing may take longer)
+          const maxAttempts = 90;
           const pollInterval = 2000; // 2 seconds
 
           const pollStatus = async () => {
             try {
-              const status = await checkSdacReportStatus(result.reportId!);
+              const analysis = await checkSdacReportAnalysisStatus(result.reportId!);
 
-              if (status.status === "processed" || status.status === "completed" || status.status === "success") {
+              if (analysis.status === "completed") {
+                setIsPreparingReport(false);
+                const status = await checkSdacReportStatus(result.reportId!);
                 updateMessage(
                   statusMsgId,
-                  `✅ **SDAC Report Ready**\n\nFile: \`${file.name}\`\nDistrict: \`${status.district || "N/A"}\`\nQuarter: \`${status.quarter || "N/A"} ${status.year || ""}\`\nTotal Personnel: \`${status.total_personnel_count || 0}\`\n\nThe report has been successfully processed. You can now run validation analysis.`
+                  `✅ **Report Ready**\n\nFile: \`${file.name}\`\nDistrict: \`${status.district || "N/A"}\`\nQuarter: \`${status.quarter || "N/A"} ${status.year || ""}\`\nPositions listed: \`${status.total_personnel_count || 0}\`\n\nYour file is ready. You can start reviewing it now.`
                 );
                 return; // Stop polling
-              } else if (status.status === "failed" || status.status === "error") {
+              } else if (analysis.status === "error") {
+                setIsPreparingReport(false);
                 updateMessage(
                   statusMsgId,
-                  `❌ **SDAC Processing Failed**\n\nFile: \`${file.name}\`\nError: ${status.message || status.error || "Unknown error"}\n\nPlease check the file format and try again.`
+                  `❌ **Review Setup Couldn’t Finish**\n\nFile: \`${file.name}\`\nError: ${analysis.message || "Unknown error"}\n\nThe file uploaded, but we could not finish preparing it for review.`
                 );
                 return; // Stop polling
-              } else if (status.status === "not_found") {
-                // Still processing, continue polling
+              } else if (analysis.status === "not_found") {
                 updateMessage(
                   statusMsgId,
-                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
+                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Getting your report ready... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
                 );
               } else {
-                // Other status (processing, queued, etc.)
                 updateMessage(
                   statusMsgId,
-                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\nStatus: \`${status.status}\`\n\n⏳ Processing... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
+                  `📤 **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\n⏳ Reviewing the file now... (${Math.floor((attempts + 1) * pollInterval / 1000)}s)`
                 );
               }
 
@@ -340,18 +363,19 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               if (attempts < maxAttempts) {
                 setTimeout(pollStatus, pollInterval);
               } else {
+                setIsPreparingReport(false);
                 // Timeout - but upload was successful, show success
                 updateMessage(
                   statusMsgId,
-                  `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded and is being processed. You can now run validation analysis.`
+                  `✅ **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\nYour file was uploaded. We are still getting it ready in the background.`
                 );
               }
             } catch (pollError) {
-              console.error("[AssistantWidget] SDAC report status poll error:", pollError);
-              // If polling fails, the upload was still successful
+              setIsPreparingReport(false);
+              console.error("[AssistantWidget] SDAC analysis status poll error:", pollError);
               updateMessage(
                 statusMsgId,
-                `✅ **SDAC Report Uploaded Successfully**\n\nFile: \`${file.name}\`\n\nThe report has been uploaded. You can now run validation analysis.`
+                `✅ **SDAC Report Uploaded**\n\nFile: \`${file.name}\`\n\nYour file was uploaded. We are still getting it ready in the background.`
               );
             }
           };
@@ -359,6 +383,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
           // Start polling after a brief delay
           setTimeout(pollStatus, pollInterval);
         } else {
+          setIsUploading(false);
           // No reportId returned but upload succeeded
           updateMessage(
             statusMsgId,
@@ -371,11 +396,10 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         const result = await uploadIngestionFile(file);
 
         // Initial success message with job ID
-        addMessage({
-          id: statusMsgId,
-          role: "ai",
-          content: `📤 **File Uploaded**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId || "N/A"}\`\n\n⏳ Processing... Checking ingestion status...`,
-        });
+        updateMessage(
+          statusMsgId,
+          `📤 **File Uploaded**\n\nFile: \`${file.name}\`\nJob ID: \`${result.jobId || "N/A"}\`\n\n⏳ Processing... Checking ingestion status...`
+        );
 
         // Poll job status if we have a jobId
         if (result.jobId) {
@@ -431,6 +455,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
         }
       }
     } catch (error) {
+      setIsPreparingReport(false);
       const rawErrorText = error instanceof Error ? error.message : "Unknown error";
       const hasStatusOnlyError = /sdac upload failed with status\s+\d+/i.test(rawErrorText);
       const errorText = hasStatusOnlyError
@@ -464,6 +489,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     const { file, userEmail, userName, district } = pendingReIngestFile;
     setPendingReIngestFile(null); // Clear pending state
     setIsUploading(true);
+    setIsPreparingReport(false);
 
     // Add message to current thread
     const activeThread = threads.find((t) => t.id === activeThreadId);
@@ -519,7 +545,7 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                   m.id === statusMsgId
                     ? {
                         ...m,
-                        content: `✅ **New Report Created**\n\nFile: \`${file.name}\`\n\nThe file has been re-ingested as a new report. Conversation history has been cleared for a fresh start. You can now run validation analysis.`,
+                        content: `✅ **New Report Created**\n\nFile: \`${file.name}\`\n\nA new report was created from this file. Conversation history has been cleared, and you can start reviewing it now.`,
                       }
                     : m
                 ),
@@ -528,10 +554,82 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
             return t;
           })
         );
+
+        let attempts = 0;
+        const maxAttempts = 90;
+        const pollInterval = 2000;
+        setIsPreparingReport(true);
+        setIsUploading(false);
+
+        const pollStatus = async () => {
+          try {
+            const analysis = await checkSdacReportAnalysisStatus(result.reportId!);
+
+            if (analysis.status === "completed") {
+              setIsPreparingReport(false);
+              const status = await checkSdacReportStatus(result.reportId!);
+              setThreads((prev) =>
+                prev.map((t) => {
+                  if (t.id === activeThreadId) {
+                    return {
+                      ...t,
+                      messages: t.messages.map((m) =>
+                        m.id === statusMsgId
+                          ? {
+                              ...m,
+                              content: `✅ **New Report Ready**\n\nFile: \`${file.name}\`\nDistrict: \`${status.district || "N/A"}\`\nQuarter: \`${status.quarter || "N/A"} ${status.year || ""}\`\nPositions listed: \`${status.total_personnel_count || 0}\`\n\nThe new report is ready, and conversation history has been cleared for a fresh start.`,
+                            }
+                          : m
+                      ),
+                    };
+                  }
+                  return t;
+                })
+              );
+              return;
+            }
+
+            if (analysis.status === "error") {
+              setIsPreparingReport(false);
+              setThreads((prev) =>
+                prev.map((t) => {
+                  if (t.id === activeThreadId) {
+                    return {
+                      ...t,
+                      messages: t.messages.map((m) =>
+                        m.id === statusMsgId
+                          ? {
+                              ...m,
+                              content: `⚠️ **New Report Created**\n\nFile: \`${file.name}\`\n\nA new report was created, but we could not finish getting it ready for review.`,
+                            }
+                          : m
+                      ),
+                    };
+                  }
+                  return t;
+                })
+              );
+              return;
+            }
+
+            attempts++;
+            if (attempts < maxAttempts) {
+              setTimeout(pollStatus, pollInterval);
+            } else {
+              setIsPreparingReport(false);
+            }
+          } catch (pollError) {
+            setIsPreparingReport(false);
+            console.error("[AssistantWidget] Re-ingest analysis status poll error:", pollError);
+          }
+        };
+
+        setTimeout(pollStatus, pollInterval);
       } else {
         throw new Error("No report ID returned from re-ingest");
       }
     } catch (error) {
+      setIsPreparingReport(false);
       console.error("[AssistantWidget] Re-ingest failed:", error);
       addMessage({
         id: (Date.now() + 1).toString(),
@@ -836,24 +934,12 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                 break;
 
               case "tool-start":
-                setActiveTools(prev => {
-                  const next = new Map(prev);
-                  next.set(json.toolCallId, {
-                    toolCallId: json.toolCallId,
-                    toolName: json.toolName,
-                    displayName: json.displayName,
-                    startTime: Date.now(),
-                  });
-                  return next;
-                });
+                setActiveToolStatus(json.displayName || json.toolName || "Working");
+                scheduleToolStatusFallback();
                 break;
 
               case "tool-result":
-                setActiveTools(prev => {
-                  const next = new Map(prev);
-                  next.delete(json.toolCallId);
-                  return next;
-                });
+                scheduleToolStatusFallback();
                 break;
 
               case "error":
@@ -866,7 +952,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
               case "done":
                 responseConversationSk = parseOptionalNumber(json.conversationSk) ?? responseConversationSk;
                 responseTurnNumber = parseOptionalNumber(json.turnNumber) ?? responseTurnNumber;
-                setActiveTools(new Map());
+                clearToolStatusTimeout();
+                setActiveToolStatus(null);
                 break;
 
               default:
@@ -1306,7 +1393,8 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
     }
 
     // Clear tool indicators
-    setActiveTools(new Map());
+    clearToolStatusTimeout();
+    setActiveToolStatus(null);
 
     setIsTyping(false);
     setStreamingMessageId(null);
@@ -1386,6 +1474,22 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
             <div className="bg-blue-600 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
               <Loader2 className="w-5 h-5 animate-spin" />
               <span className="text-sm font-medium">Uploading...</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isPreparingReport && !isUploading && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-16 left-0 right-0 z-30 mx-4"
+          >
+            <div className="bg-slate-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3">
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span className="text-sm font-medium">Getting your report ready. You can keep chatting while this finishes.</span>
             </div>
           </motion.div>
         )}
@@ -1797,14 +1901,10 @@ export function AssistantWidget({ onClose }: { onClose?: () => void }) {
                       <Bot className="w-3.5 h-3.5 text-blue-600" />
                     </div>
                     <div className="bg-white border border-slate-100 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
-                      {activeTools.size > 0 ? (
-                        <div className="flex flex-col gap-1">
-                          {Array.from(activeTools.values()).map((tool) => (
-                            <div key={tool.toolCallId} className="flex items-center gap-2 text-sm text-slate-600">
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                              <span>{tool.displayName}...</span>
-                            </div>
-                          ))}
+                      {activeToolStatus ? (
+                        <div className="flex items-center gap-2 text-sm text-slate-600">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                          <span>{activeToolStatus}...</span>
                         </div>
                       ) : (
                         <div className="flex gap-1">

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -34,10 +34,36 @@ const setReportId = () => {
   sessionStorage.setItem("sdac-uploaded-report-id", REPORT_ID);
 };
 
+const mockSession = () => {
+  server.use(
+    http.post("*/sdac/sessions", () =>
+      HttpResponse.json({
+        session_id: "test-session-001",
+        district_id: "138",
+        expires_at: "2026-12-31T00:00:00.000Z",
+        is_new: true,
+        report_id: REPORT_ID,
+        user_id: "demo-user",
+        user_email: "demo@example.com",
+        user_name: "Demo User",
+        user_role: "District Admin",
+        district_name: "Demo District",
+        quarter: null,
+        year: null,
+      })
+    )
+  );
+};
+
 describe("AssistantWidget flows", () => {
   beforeEach(() => {
     sessionStorage.clear();
     setReportId();
+    mockSession();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("persists conversationId after first response", async () => {
@@ -210,7 +236,9 @@ describe("AssistantWidget flows", () => {
 
     await screen.findByText(/Summary response/i);
 
-    expect(requestBody?.message).toMatch(/Generate a comprehensive summary/i);
+    expect((requestBody as { message?: string } | null)?.message).toMatch(
+      /Generate a comprehensive summary/i
+    );
   });
 
   it("shows tool progress indicators during streaming", async () => {
@@ -259,6 +287,92 @@ describe("AssistantWidget flows", () => {
     await waitFor(() =>
       expect(screen.queryByText(/Validating report/i)).not.toBeInTheDocument()
     );
+  });
+
+  it("keeps the latest tool status visible between tool calls before falling back to dots", async () => {
+    server.use(
+      http.post("*/sdac/chat", () => {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                buildSseChunk("tool-start", {
+                  toolCallId: "tool-1",
+                  toolName: "validate-report",
+                  displayName: "Validating report",
+                })
+              )
+            );
+
+            setTimeout(() => {
+              controller.enqueue(
+                encoder.encode(
+                  buildSseChunk("tool-result", {
+                    toolCallId: "tool-1",
+                    success: true,
+                  })
+                )
+              );
+            }, 40);
+
+            setTimeout(() => {
+              controller.enqueue(
+                encoder.encode(
+                  buildSseChunk("tool-start", {
+                    toolCallId: "tool-2",
+                    toolName: "review-salary-data",
+                    displayName: "Reviewing salary data",
+                    })
+                  )
+                );
+            }, 120);
+
+            setTimeout(() => {
+              controller.enqueue(
+                encoder.encode(
+                  buildSseChunk("tool-result", {
+                    toolCallId: "tool-2",
+                    success: true,
+                    })
+                  )
+                );
+            }, 140);
+
+            setTimeout(() => {
+              controller.enqueue(
+                encoder.encode(buildSseChunk("delta", { content: "Final answer" }))
+              );
+                controller.enqueue(
+                  encoder.encode(buildSseChunk("done", { success: true }))
+                );
+                controller.close();
+            }, 340);
+          },
+        });
+
+        return new HttpResponse(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      })
+    );
+
+    render(<AssistantWidget toolStatusPersistMs={80} />);
+
+    const input = screen.getByPlaceholderText("Ask anything...");
+    await userEvent.type(input, "Run tools");
+    await userEvent.keyboard("{Enter}");
+
+    await expect(screen.findByText(/Reviewing salary data/i)).resolves.toBeDefined();
+    expect(screen.queryByText(/Validating report/i)).not.toBeInTheDocument();
+
+    await new Promise(resolve => setTimeout(resolve, 90));
+    await waitFor(() =>
+      expect(screen.queryByText(/Reviewing salary data/i)).not.toBeInTheDocument()
+    );
+    expect(screen.queryByText(/Final answer/i)).not.toBeInTheDocument();
+
+    await expect(screen.findByText(/Final answer/i)).resolves.toBeDefined();
   });
 
   it("shows a friendly error when the stream returns an error event", async () => {
