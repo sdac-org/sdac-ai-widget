@@ -37,6 +37,7 @@ import type { Feature } from "@/features";
 type ViewState = "main" | "analyzing" | "chat";
 
 const TOOL_STATUS_PERSIST_MS = 10_000;
+const FEEDBACK_SUCCESS_PERSIST_MS = 4_000;
 
 type Message = {
   id: string;
@@ -143,6 +144,7 @@ export function AssistantWidget({
   });
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolStatusTimeoutRef = useRef<number | null>(null);
+  const feedbackResetTimeoutsRef = useRef<Map<string, number>>(new Map());
   const agentId = "sdac-coordinator-release";
 
   const clearToolStatusTimeout = () => {
@@ -162,7 +164,51 @@ export function AssistantWidget({
 
   useEffect(() => () => {
     clearToolStatusTimeout();
+    feedbackResetTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    feedbackResetTimeoutsRef.current.clear();
   }, []);
+
+  const clearFeedbackResetTimeout = (feedbackKey: string) => {
+    const timeoutId = feedbackResetTimeoutsRef.current.get(feedbackKey);
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+      feedbackResetTimeoutsRef.current.delete(feedbackKey);
+    }
+  };
+
+  const scheduleFeedbackReset = (
+    params:
+      | { scope: "response"; threadId: string; messageId: string }
+      | { scope: "conversation"; threadId: string }
+  ) => {
+    const feedbackKey =
+      params.scope === "response"
+        ? `${params.threadId}:${params.messageId}`
+        : `conversation:${params.threadId}`;
+
+    clearFeedbackResetTimeout(feedbackKey);
+
+    const timeoutId = window.setTimeout(() => {
+      if (params.scope === "response") {
+        updateMessageFeedback(params.threadId, params.messageId, (current) => ({
+          ...current,
+          status: "idle",
+          isOpen: false,
+          error: undefined,
+        }));
+      } else {
+        updateThreadFeedback(params.threadId, (current) => ({
+          ...current,
+          status: "idle",
+          isOpen: false,
+          error: undefined,
+        }));
+      }
+      feedbackResetTimeoutsRef.current.delete(feedbackKey);
+    }, FEEDBACK_SUCCESS_PERSIST_MS);
+
+    feedbackResetTimeoutsRef.current.set(feedbackKey, timeoutId);
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1272,8 +1318,17 @@ export function AssistantWidget({
       });
       if (isResponseScope) {
         updateMessageFeedback(params.threadId, params.message.id, setSubmitted);
+        scheduleFeedbackReset({
+          scope: "response",
+          threadId: params.threadId,
+          messageId: params.message.id,
+        });
       } else {
         updateThreadFeedback(params.threadId, setSubmitted);
+        scheduleFeedbackReset({
+          scope: "conversation",
+          threadId: params.threadId,
+        });
       }
     } catch (error) {
       const setError = (current: FeedbackState) => ({

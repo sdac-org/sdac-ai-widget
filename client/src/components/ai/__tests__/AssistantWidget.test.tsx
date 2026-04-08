@@ -470,4 +470,34 @@ describe("AssistantWidget feedback", () => {
     await screen.findByText(/thanks!/i);
     expect(feedbackScope.queryByPlaceholderText(/what went wrong\?/i)).not.toBeInTheDocument();
   });
+
+  it("restores response feedback controls a few seconds after successful submission", async () => {
+    mockAgentChat({ conversationSk: 55, turnNumber: 1, content: "Timed reset response" });
+
+    mockFeedback(() =>
+      new HttpResponse(JSON.stringify({ success: true, feedbackSk: 654 }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      })
+    );
+
+    render(<AssistantWidget />);
+
+    const input = screen.getByPlaceholderText("Ask anything...");
+    await userEvent.type(input, "Timed feedback reset");
+    await userEvent.keyboard("{Enter}");
+
+    const feedbackScope = await getFeedbackScope(/Timed reset response/i);
+    await userEvent.click(feedbackScope.getByRole("button", { name: /send feedback/i }));
+    await userEvent.selectOptions(feedbackScope.getByRole("combobox"), "other");
+    await userEvent.type(feedbackScope.getByPlaceholderText(/what went wrong\?/i), "Please let me edit this again.");
+    await userEvent.click(feedbackScope.getByRole("button", { name: /^send$/i }));
+
+    await screen.findByText(/thanks!/i);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/thanks!/i)).not.toBeInTheDocument();
+      expect(feedbackScope.getByRole("button", { name: /send feedback/i })).toBeInTheDocument();
+    }, { timeout: 6_000 });
+  }, 7_000);
 });
