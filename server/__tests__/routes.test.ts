@@ -29,13 +29,24 @@ describe("server routes", () => {
     expect(res.body.timestamp).toBeDefined();
   });
 
-  it("does not expose /api/config endpoint", async () => {
+  it("returns the legacy /health endpoint", async () => {
+    const app = express();
+    const server = createServer(app);
+    await registerRoutes(server, app);
+
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+  });
+
+  it("exposes runtime config from /api/config", async () => {
     const app = express();
     const server = createServer(app);
     await registerRoutes(server, app);
 
     const res = await request(app).get("/api/config");
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("agentId");
   });
 
   it("mounts ingestion proxy at /api/ingestion", async () => {
@@ -48,5 +59,27 @@ describe("server routes", () => {
     const res = await request(app).get("/api/ingestion/sdac/costs");
     expect(res.status).toBe(502);
     expect(res.body.error).toBe("Proxy error");
+  });
+
+  it("mirrors health and proxy routes under the configured base path", async () => {
+    process.env.PUBLIC_BASE_PATH = "/widget";
+    const app = express();
+    app.use(express.json());
+    const server = createServer(app);
+    await registerRoutes(server, app);
+
+    const healthRes = await request(app).get("/widget/health");
+    expect(healthRes.status).toBe(200);
+    expect(healthRes.body.status).toBe("ok");
+
+    const configRes = await request(app).get("/widget/api/config");
+    expect(configRes.status).toBe(200);
+    expect(configRes.body).toHaveProperty("agentId");
+
+    const proxyRes = await request(app).get("/widget/api/ingestion/sdac/costs");
+    expect(proxyRes.status).toBe(502);
+    expect(proxyRes.body.error).toBe("Proxy error");
+
+    delete process.env.PUBLIC_BASE_PATH;
   });
 });

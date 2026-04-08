@@ -1,6 +1,7 @@
 import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import { createIngestionProxy } from "./ingestion-proxy";
+import { buildBasePathRoute, getPublicBasePath } from "./base-path";
 
 /**
  * Widget Server Routes
@@ -12,20 +13,30 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express,
 ): Promise<Server> {
-  app.get("/api/health", (_req: Request, res: Response) => {
-    return res.json({ status: "ok", timestamp: new Date().toISOString() });
-  });
+  const basePath = getPublicBasePath();
+  const routePrefixes = ["", basePath].filter(
+    (value, index, values) => value || values.indexOf(value) === index,
+  );
 
-  app.get("/api/config", (_req: Request, res: Response) => {
+  const healthHandler = (_req: Request, res: Response) => {
+    return res.json({ status: "ok", timestamp: new Date().toISOString() });
+  };
+
+  const configHandler = (_req: Request, res: Response) => {
     return res.json({
       agentId: process.env.SDAC_AGENT_ID || process.env.MASTRA_AGENT_ID || null,
     });
-  });
+  };
 
-  app.use("/api/ingestion", createIngestionProxy());
+  for (const routePrefix of routePrefixes) {
+    app.get(buildBasePathRoute("/health", routePrefix), healthHandler);
+    app.get(buildBasePathRoute("/api/health", routePrefix), healthHandler);
+    app.get(buildBasePathRoute("/api/config", routePrefix), configHandler);
+    app.use(buildBasePathRoute("/api/ingestion", routePrefix), createIngestionProxy());
+  }
 
   console.log(
-    "[routes] Health check + ingestion proxy registered (/api/ingestion -> Ingestion Server)",
+    `[routes] Health check + ingestion proxy registered (basePath=${basePath || "/"}, /api/ingestion -> Ingestion Server)`,
   );
   return httpServer;
 }

@@ -5,7 +5,14 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { metaImagesPlugin } from "./vite-plugin-meta-images";
 
+const rawBasePath = (process.env.VITE_PUBLIC_BASE_PATH || "/").trim();
+const normalizedBasePath =
+  !rawBasePath || rawBasePath === "/"
+    ? "/"
+    : `${rawBasePath.startsWith("/") ? rawBasePath : `/${rawBasePath}`}`.replace(/\/+$/, "") + "/";
+
 export default defineConfig({
+  base: normalizedBasePath,
   plugins: [
     react(),
     runtimeErrorOverlay(),

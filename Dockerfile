@@ -24,6 +24,7 @@ COPY . .
 
 # Build arguments for Vite (client-side env vars must be set at build time)
 ARG VITE_INGESTION_API_URL=""
+ARG VITE_PUBLIC_BASE_PATH="/"
 ARG VITE_REPORT_ID=""
 ARG VITE_DEMO_USER_ID="demo-user"
 ARG VITE_DEMO_USER_NAME="Demo User"
@@ -33,6 +34,7 @@ ARG VITE_DEMO_DISTRICT="Demo District"
 
 # Set environment variables for build
 ENV VITE_INGESTION_API_URL=$VITE_INGESTION_API_URL
+ENV VITE_PUBLIC_BASE_PATH=$VITE_PUBLIC_BASE_PATH
 ENV VITE_REPORT_ID=$VITE_REPORT_ID
 ENV VITE_DEMO_USER_ID=$VITE_DEMO_USER_ID
 ENV VITE_DEMO_USER_NAME=$VITE_DEMO_USER_NAME
@@ -49,6 +51,8 @@ RUN npm run build
 FROM node:22-alpine AS production
 
 WORKDIR /app
+
+ARG VITE_PUBLIC_BASE_PATH="/"
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
@@ -73,6 +77,7 @@ USER nodejs
 # Environment variables (can be overridden at runtime)
 ENV NODE_ENV=production
 ENV PORT=5000
+ENV PUBLIC_BASE_PATH=$VITE_PUBLIC_BASE_PATH
 
 # Expose the port
 EXPOSE 5000
