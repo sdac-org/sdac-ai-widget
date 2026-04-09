@@ -38,6 +38,18 @@ interface UseServerSessionReturn {
   quarter: string | null;
   /** Year from server session (null if unavailable) */
   year: number | null;
+  /** How the server resolved report context for this session */
+  resolutionStatus: "exact_match" | "fallback_available" | "no_data" | "missing_context" | null;
+  /** Requested quarter from host page context */
+  requestedQuarter: string | null;
+  /** Requested year from host page context */
+  requestedYear: number | null;
+  /** Best available fallback period when exact match is unavailable */
+  fallbackCandidate: {
+    quarter: string;
+    year: number;
+    record_count?: number;
+  } | null;
   /** Whether the session is being initialized */
   isInitializing: boolean;
   /** Error message if session creation failed */
@@ -54,6 +66,10 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
   const [districtName, setDistrictName] = useState<string | null>(null);
   const [quarter, setQuarter] = useState<string | null>(null);
   const [year, setYear] = useState<number | null>(null);
+  const [resolutionStatus, setResolutionStatus] = useState<UseServerSessionReturn["resolutionStatus"]>(null);
+  const [requestedQuarter, setRequestedQuarter] = useState<string | null>(null);
+  const [requestedYear, setRequestedYear] = useState<number | null>(null);
+  const [fallbackCandidate, setFallbackCandidate] = useState<UseServerSessionReturn["fallbackCandidate"]>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initRef = useRef(false);
@@ -97,6 +113,10 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
         if (session.year != null) {
           setYear(session.year);
         }
+        setResolutionStatus(session.resolution_status ?? null);
+        setRequestedQuarter(session.requested_quarter ?? null);
+        setRequestedYear(session.requested_year ?? null);
+        setFallbackCandidate(session.fallback_candidate ?? null);
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Session creation failed";
         console.warn("[useServerSession] Session init failed:", msg);
@@ -110,5 +130,17 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
     init();
   }, [districtId, userId, userName, userEmail, userRole, hostContext.quarter, hostContext.year]);
 
-  return { serverSessionId, reportId, districtName, quarter, year, isInitializing, error };
+  return {
+    serverSessionId,
+    reportId,
+    districtName,
+    quarter,
+    year,
+    resolutionStatus,
+    requestedQuarter,
+    requestedYear,
+    fallbackCandidate,
+    isInitializing,
+    error,
+  };
 }

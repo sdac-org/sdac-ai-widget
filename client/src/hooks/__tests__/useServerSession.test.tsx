@@ -45,6 +45,8 @@ function HookProbe(props: HookProbeProps) {
     <div>
       <div data-testid="session-id">{result.serverSessionId ?? "null"}</div>
       <div data-testid="report-id">{result.reportId ?? "null"}</div>
+      <div data-testid="resolution-status">{result.resolutionStatus ?? "null"}</div>
+      <div data-testid="fallback-quarter">{result.fallbackCandidate?.quarter ?? "null"}</div>
       <div data-testid="is-initializing">{String(result.isInitializing)}</div>
       <div data-testid="error">{result.error ?? "null"}</div>
     </div>
@@ -95,6 +97,7 @@ describe("useServerSession", () => {
     mockedCreateSession.mockResolvedValue({
       ...SESSION_RESPONSE,
       report_id: null,
+      resolution_status: "no_data",
     });
 
     render(<HookProbe {...BASE_PROPS} />);
@@ -103,6 +106,29 @@ describe("useServerSession", () => {
       expect(screen.getByTestId("session-id").textContent).toBe("s1");
     });
     expect(screen.getByTestId("report-id").textContent).toBe("null");
+    expect(screen.getByTestId("resolution-status").textContent).toBe("no_data");
+  });
+
+  it("surfaces fallback metadata when exact quarter is unavailable", async () => {
+    mockedCreateSession.mockResolvedValue({
+      ...SESSION_RESPONSE,
+      report_id: null,
+      resolution_status: "fallback_available",
+      requested_quarter: "Q2",
+      requested_year: 2025,
+      fallback_candidate: {
+        quarter: "Q2",
+        year: 2024,
+        record_count: 14,
+      },
+    });
+
+    render(<HookProbe {...BASE_PROPS} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resolution-status").textContent).toBe("fallback_available");
+    });
+    expect(screen.getByTestId("fallback-quarter").textContent).toBe("Q2");
   });
 
   it("sets error on createSession failure", async () => {

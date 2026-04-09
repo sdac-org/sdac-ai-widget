@@ -17,7 +17,6 @@ import {
   FileText,
   RefreshCw,
 } from "lucide-react";
-import { MOCK_ISSUES, REPORT_DATA } from "@/lib/mock-data";
 import {
   uploadIngestionFile,
   uploadSdacReport,
@@ -30,6 +29,7 @@ import { useSessionContext, saveUploadedReportId, getUploadedReportId, clearUplo
 import { getHostPageContext } from "@/hooks/useHostPageContext";
 import { useServerSession } from "@/hooks/useServerSession";
 import { getIngestionApiUrl } from "@/lib/api-config";
+import { syncDistrictReport } from "@/lib/session-api";
 import { SuggestedActions } from "./components/SuggestedActions";
 import { MessageRenderer } from "@/renderers";
 import type { Feature } from "@/features";
@@ -111,6 +111,22 @@ type ValidationResult = {
   };
 };
 
+type ResolvedReportContext = {
+  districtName: string | null;
+  quarter: string | null;
+  year: number | null;
+};
+
+function getDefaultReportId(): string {
+  const uploadedId = getUploadedReportId();
+  if (uploadedId) return uploadedId;
+  const mode = import.meta.env.MODE;
+  if (mode === "development" || mode === "test") {
+    return (import.meta.env.VITE_REPORT_ID as string) || "";
+  }
+  return "";
+}
+
 export function AssistantWidget({
   onClose,
   toolStatusPersistMs = TOOL_STATUS_PERSIST_MS,
@@ -137,11 +153,10 @@ export function AssistantWidget({
     userName: string;
     district: string;
   } | null>(null);
-  // Active report ID: from uploaded report (ephemeral) or from env variable (fallback)
-  const [activeReportId, setActiveReportId] = useState<string>(() => {
-    const uploadedId = getUploadedReportId();
-    return uploadedId || (import.meta.env.VITE_REPORT_ID as string) || "";
-  });
+  const [activeReportId, setActiveReportId] = useState<string>(() => getDefaultReportId());
+  const [resolvedReportContext, setResolvedReportContext] = useState<ResolvedReportContext | null>(null);
+  const [contextResolutionError, setContextResolutionError] = useState<string | null>(null);
+  const [isResolvingFallback, setIsResolvingFallback] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const toolStatusTimeoutRef = useRef<number | null>(null);
   const feedbackResetTimeoutsRef = useRef<Map<string, number>>(new Map());
@@ -330,6 +345,8 @@ export function AssistantWidget({
         if (result.reportId) {
           saveUploadedReportId(result.reportId);
           setActiveReportId(result.reportId);
+          setResolvedReportContext(null);
+          setContextResolutionError(null);
           console.log("[AssistantWidget] Saved uploaded report ID:", result.reportId, result.isDuplicate ? "(duplicate)" : "");
         }
 
@@ -575,6 +592,8 @@ export function AssistantWidget({
       if (result.reportId) {
         saveUploadedReportId(result.reportId);
         setActiveReportId(result.reportId);
+        setResolvedReportContext(null);
+        setContextResolutionError(null);
         console.log("[AssistantWidget] Re-ingest successful, new report ID:", result.reportId);
 
         // Clear conversation state/history for a fresh context on the new report
@@ -700,7 +719,18 @@ export function AssistantWidget({
   });
 
   // Initialize server-side session and resolve TherapyLog report for this district
-  const { reportId: serverReportId, districtName: serverDistrictName, quarter: serverQuarter, year: serverYear } = useServerSession({
+  const {
+    reportId: serverReportId,
+    districtName: serverDistrictName,
+    quarter: serverQuarter,
+    year: serverYear,
+    resolutionStatus,
+    requestedQuarter,
+    requestedYear,
+    fallbackCandidate,
+    isInitializing: isServerSessionInitializing,
+    error: serverSessionError,
+  } = useServerSession({
     districtId: hostContext.districtId,
     userId: hostContext.userId,
     userName: hostContext.userName,
@@ -714,8 +744,40 @@ export function AssistantWidget({
     const uploadedId = getUploadedReportId();
     if (!uploadedId) {
       setActiveReportId(serverReportId);
+      setResolvedReportContext({
+        districtName: serverDistrictName,
+        quarter: serverQuarter,
+        year: serverYear,
+      });
     }
-  }, [serverReportId]);
+  }, [serverDistrictName, serverQuarter, serverReportId, serverYear]);
+
+  const effectiveDistrictName =
+    resolvedReportContext?.districtName ?? hostContext.districtName ?? serverDistrictName;
+  const effectiveQuarter =
+    resolvedReportContext?.quarter ?? hostContext.quarter ?? serverQuarter;
+  const effectiveYear =
+    resolvedReportContext?.year != null
+      ? String(resolvedReportContext.year)
+      : hostContext.year || (serverYear != null ? String(serverYear) : null);
+  const requestedQuarterLabel = requestedQuarter || hostContext.quarter || null;
+  const requestedYearLabel =
+    requestedYear != null ? String(requestedYear) : hostContext.year || null;
+  const hasExplicitReport = Boolean(activeReportId);
+  const isMissingDistrictContext = !hostContext.districtId && !hasExplicitReport;
+  const isAwaitingSessionResolution =
+    !hasExplicitReport && Boolean(hostContext.districtId) && isServerSessionInitializing;
+  const isAwaitingFallbackSelection =
+    !hasExplicitReport && resolutionStatus === "fallback_available" && !!fallbackCandidate;
+  const hasNoResolvedData =
+    !hasExplicitReport &&
+    (resolutionStatus === "no_data" || resolutionStatus === "missing_context");
+  const isInteractionBlocked =
+    isMissingDistrictContext ||
+    isAwaitingSessionResolution ||
+    isAwaitingFallbackSelection ||
+    hasNoResolvedData ||
+    (!!serverSessionError && !hasExplicitReport);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -725,7 +787,47 @@ export function AssistantWidget({
 
   const activeThread = threads.find((t) => t.id === activeThreadId);
 
+  const handleUseLatestAvailableQuarter = async () => {
+    if (!hostContext.districtId) {
+      setContextResolutionError("This page did not provide district context.");
+      return;
+    }
+
+    setContextResolutionError(null);
+    setIsResolvingFallback(true);
+
+    try {
+      const result = await syncDistrictReport({
+        districtId: hostContext.districtId,
+        quarter: requestedQuarterLabel ?? undefined,
+        year: requestedYearLabel ?? undefined,
+        allowFallback: true,
+      });
+
+      if (!result.report_id) {
+        throw new Error("No fallback report was returned.");
+      }
+
+      setActiveReportId(result.report_id);
+      setResolvedReportContext({
+        districtName: result.district_name ?? serverDistrictName,
+        quarter: result.quarter ?? null,
+        year: result.year ?? null,
+      });
+    } catch (error) {
+      setContextResolutionError(
+        error instanceof Error ? error.message : "Failed to load the latest available quarter."
+      );
+    } finally {
+      setIsResolvingFallback(false);
+    }
+  };
+
   const startAnalysis = async () => {
+    if (isInteractionBlocked || !sessionContext.reportId) {
+      return;
+    }
+
     setView("analyzing");
     setValidationError(null);
 
@@ -769,46 +871,8 @@ export function AssistantWidget({
     } catch (error) {
       console.error("[AssistantWidget] Validation error:", error);
       setValidationError(error instanceof Error ? error.message : "Validation failed");
-      
-      // Fall back to mock data on error
-      setValidationResult({
-        reportId: sessionContext.reportId,
-        districtName: REPORT_DATA.districtName,
-        quarter: REPORT_DATA.quarter,
-        totalRecords: REPORT_DATA.positions,
-        issues: MOCK_ISSUES.map((issue) => ({
-          ...issue,
-          priority: issue.priority as "high" | "medium" | "low",
-          category: "MOCK",
-        })),
-        summary: {
-          errorCount: MOCK_ISSUES.filter((i) => i.priority === "high").length,
-          warningCount: MOCK_ISSUES.filter((i) => i.priority === "medium").length,
-          passedCount: 5,
-          analysisTime: 0,
-        },
-      });
-
-      if (!threads.find((t) => t.id === "overview")) {
-        const overviewThread: Thread = {
-          id: "overview",
-          title: "Potential Issues Evaluation",
-          type: "overview",
-          messages: [
-            {
-              id: "summary-component",
-              role: "ai",
-              content: "",
-              isLocalComponent: "summary",
-            },
-          ],
-          lastMessageAt: new Date(),
-        };
-        setThreads((prev) => [overviewThread, ...prev]);
-      }
-
-      setView("chat");
-      setActiveThreadId("overview");
+      setValidationResult(null);
+      setView("main");
     }
   };
 
@@ -843,6 +907,8 @@ export function AssistantWidget({
   };
 
   const createGeneralThread = (initialMsg?: string) => {
+    if (isInteractionBlocked) return;
+
     // Plain text welcome message
     const welcomeContent = "I'm ready to help. You can ask me about source codes, cost pools, or general validation rules.";
 
@@ -864,6 +930,8 @@ export function AssistantWidget({
   };
 
   const handleFeatureSelect = (feature: Feature, prompt: string) => {
+    if (isInteractionBlocked) return;
+
     if (feature.id === "evaluate-issues") {
       startAnalysis();
       return;
@@ -898,13 +966,6 @@ export function AssistantWidget({
       }
       return undefined;
     };
-
-    // Simplified payload - backend manages conversation history
-    // reportId is optional - if not provided, agent will ask user to upload a report
-    // Prefer host page context over server session values
-    const effectiveDistrictName = hostContext.districtName || serverDistrictName;
-    const effectiveQuarter = hostContext.quarter || serverQuarter;
-    const effectiveYear = hostContext.year || (serverYear != null ? String(serverYear) : null);
 
     const payload = {
       agentId,
@@ -1345,7 +1406,7 @@ export function AssistantWidget({
   };
 
   const handleSendMessage = async (text: string, threadIdOverride?: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || isInteractionBlocked) return;
 
     const targetThreadId = threadIdOverride || activeThreadId;
 
@@ -1483,7 +1544,9 @@ export function AssistantWidget({
     clearConversation();
     // Clear uploaded report ID and reset to default
     clearUploadedReportId();
-    setActiveReportId((import.meta.env.VITE_REPORT_ID as string) || "");
+    setActiveReportId(getDefaultReportId());
+    setResolvedReportContext(null);
+    setContextResolutionError(null);
     // Clear validation state
     setValidationResult(null);
     setValidationError(null);
@@ -1493,6 +1556,22 @@ export function AssistantWidget({
     // Return to main view
     setView("main");
   };
+
+  const renderContextBanner = () => (
+    <ContextStatusBanner
+      isMissingDistrictContext={isMissingDistrictContext}
+      isAwaitingSessionResolution={isAwaitingSessionResolution}
+      isAwaitingFallbackSelection={isAwaitingFallbackSelection}
+      hasNoResolvedData={hasNoResolvedData}
+      serverSessionError={serverSessionError}
+      contextResolutionError={contextResolutionError}
+      requestedQuarter={requestedQuarterLabel}
+      requestedYear={requestedYearLabel}
+      fallbackCandidate={fallbackCandidate}
+      isResolvingFallback={isResolvingFallback}
+      onUseFallback={handleUseLatestAvailableQuarter}
+    />
+  );
 
   return (
     <div 
@@ -1585,7 +1664,8 @@ export function AssistantWidget({
             <>
               <button
                 onClick={() => createGeneralThread()}
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors"
+                disabled={isInteractionBlocked}
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 title="New Chat"
               >
                 <Plus className="w-4 h-4" />
@@ -1734,6 +1814,12 @@ export function AssistantWidget({
                     </div>
                   </div>
                 )}
+                {renderContextBanner()}
+                {validationError && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800">
+                    Could not connect to validation service. Please try again.
+                  </div>
+                )}
                 <div className="overflow-visible">
                   <SuggestedActions
                     onFeatureSelect={handleFeatureSelect}
@@ -1752,12 +1838,13 @@ export function AssistantWidget({
                     onKeyDown={(e) =>
                       e.key === "Enter" && handleSendMessage(inputValue)
                     }
-                    placeholder="Ask anything..."
+                    placeholder={isInteractionBlocked ? "Resolve report context to continue..." : "Ask anything..."}
+                    disabled={isInteractionBlocked}
                     className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                   />
                   <button
                     onClick={() => handleSendMessage(inputValue)}
-                    disabled={!inputValue.trim()}
+                    disabled={!inputValue.trim() || isInteractionBlocked}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Send className="w-3.5 h-3.5" />
@@ -2013,6 +2100,12 @@ export function AssistantWidget({
                     </div>
                   </div>
                 )}
+                {renderContextBanner()}
+                {validationError && (
+                  <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800">
+                    Could not connect to validation service. Please try again.
+                  </div>
+                )}
 
                 {activeThread && (
                   <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -2132,12 +2225,13 @@ export function AssistantWidget({
                     onKeyDown={(e) =>
                       e.key === "Enter" && handleSendMessage(inputValue)
                     }
-                    placeholder="Ask anything..."
+                    placeholder={isInteractionBlocked ? "Resolve report context to continue..." : "Ask anything..."}
+                    disabled={isInteractionBlocked}
                     className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                   />
                   <button
                     onClick={() => handleSendMessage(inputValue)}
-                    disabled={!inputValue.trim()}
+                    disabled={!inputValue.trim() || isInteractionBlocked}
                     className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Send className="w-3.5 h-3.5" />
@@ -2150,6 +2244,98 @@ export function AssistantWidget({
       </div>
     </div>
   );
+}
+
+function ContextStatusBanner({
+  isMissingDistrictContext,
+  isAwaitingSessionResolution,
+  isAwaitingFallbackSelection,
+  hasNoResolvedData,
+  serverSessionError,
+  contextResolutionError,
+  requestedQuarter,
+  requestedYear,
+  fallbackCandidate,
+  isResolvingFallback,
+  onUseFallback,
+}: {
+  isMissingDistrictContext: boolean;
+  isAwaitingSessionResolution: boolean;
+  isAwaitingFallbackSelection: boolean;
+  hasNoResolvedData: boolean;
+  serverSessionError: string | null;
+  contextResolutionError: string | null;
+  requestedQuarter: string | null;
+  requestedYear: string | null;
+  fallbackCandidate: {
+    quarter: string;
+    year: number;
+    record_count?: number;
+  } | null;
+  isResolvingFallback: boolean;
+  onUseFallback: () => void;
+}) {
+  if (isAwaitingSessionResolution) {
+    return (
+      <div className="bg-slate-100 border border-slate-200 rounded-lg p-3 text-xs text-slate-700">
+        Resolving district report context...
+      </div>
+    );
+  }
+
+  if (isMissingDistrictContext) {
+    return (
+      <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800">
+        This page did not provide district context. The widget cannot load SDAC data until a district is supplied or a report is uploaded.
+      </div>
+    );
+  }
+
+  if (isAwaitingFallbackSelection && fallbackCandidate) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+        <p className="text-xs text-amber-900">
+          {requestedQuarter && requestedYear
+            ? `${requestedQuarter} ${requestedYear} is not available for this district.`
+            : "The requested reporting period is not available for this district."}{" "}
+          The latest available quarter is {fallbackCandidate.quarter} {fallbackCandidate.year}.
+        </p>
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-[11px] text-amber-700">
+            Use the latest available quarter only if you want to leave the page context.
+          </span>
+          <button
+            type="button"
+            onClick={onUseFallback}
+            disabled={isResolvingFallback}
+            className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isResolvingFallback ? "Loading..." : `Use ${fallbackCandidate.quarter} ${fallbackCandidate.year}`}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasNoResolvedData) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900">
+        {requestedQuarter && requestedYear
+          ? `No SDAC data is available for ${requestedQuarter} ${requestedYear} for this district.`
+          : "No SDAC data is available for this district."}
+      </div>
+    );
+  }
+
+  if (serverSessionError || contextResolutionError) {
+    return (
+      <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-xs text-rose-800">
+        {contextResolutionError || serverSessionError}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 /** Local summary component showing validation issues */
@@ -2185,7 +2371,7 @@ function SummaryComponent({
       {validationError && (
         <div className="bg-amber-50 p-3 rounded-xl border border-amber-200">
           <p className="text-xs text-amber-800">
-            <strong>Note:</strong> Could not connect to validation service. Showing cached/mock data.
+            <strong>Note:</strong> Could not connect to validation service. No fallback data was shown.
           </p>
         </div>
       )}

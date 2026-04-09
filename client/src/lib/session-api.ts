@@ -20,6 +20,39 @@ export interface SessionResponse {
   district_name?: string | null;
   quarter?: string | null;
   year?: number | null;
+  resolution_status?: "exact_match" | "fallback_available" | "no_data" | "missing_context";
+  requested_quarter?: string | null;
+  requested_year?: number | null;
+  fallback_candidate?: {
+    quarter: string;
+    year: number;
+    record_count?: number;
+  } | null;
+}
+
+export interface SyncDistrictResponse {
+  report_id?: string | null;
+  status?: string | null;
+  record_count?: number;
+  synced?: boolean;
+  district_name?: string | null;
+  quarter?: string | null;
+  year?: number | null;
+  fallback?: boolean;
+  requested_quarter?: string | null;
+  requested_year?: number | null;
+  available_quarters?: Array<{
+    quarter: string;
+    year: number;
+    record_count?: number;
+  }>;
+  resolution_status?: "exact_match" | "fallback_available" | "no_data" | "missing_context";
+  fallback_candidate?: {
+    quarter: string;
+    year: number;
+    record_count?: number;
+  } | null;
+  error?: string;
 }
 
 export async function createSession(params: {
@@ -73,6 +106,37 @@ export async function validateSession(sessionId: string): Promise<SessionRespons
     throw new Error("Failed to validate session");
   }
   return response.json();
+}
+
+export async function syncDistrictReport(params: {
+  districtId: string;
+  quarter?: string;
+  year?: string;
+  allowFallback?: boolean;
+  force?: boolean;
+}): Promise<SyncDistrictResponse> {
+  const normalizedQuarter = normalizeQuarter(params.quarter);
+  const normalizedYear = normalizeYear(params.year);
+  const url = `${getIngestionApiUrl()}/sdac/sync`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      district_id: params.districtId,
+      quarter: normalizedQuarter,
+      year: normalizedYear,
+      allow_fallback: params.allowFallback ?? false,
+      force: params.force ?? false,
+    }),
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || "Failed to sync district report");
+  }
+
+  return result as SyncDistrictResponse;
 }
 
 function normalizeQuarter(quarter?: string): number | null {

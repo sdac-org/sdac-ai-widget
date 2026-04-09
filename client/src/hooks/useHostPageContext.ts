@@ -5,7 +5,8 @@
  * embed.js reads data attributes from the host page DOM and passes
  * them to the iframe as URL query parameters.
  *
- * Falls back to VITE_DEMO_* env vars for local development.
+ * User identity may fall back to VITE_DEMO_* env vars for local development,
+ * but district/report context must come from the host page.
  */
 
 export interface HostPageContext {
@@ -35,7 +36,7 @@ export function getHostPageContext(): HostPageContext {
   const params = new URLSearchParams(window.location.search);
 
   return {
-    districtId: params.get("districtId") || import.meta.env.VITE_DEMO_DISTRICT_ID || "",
+    districtId: params.get("districtId") || "",
     districtName: params.get("districtName") || "",
     quarter: params.get("quarter") || "",
     year: params.get("year") || "",

@@ -34,6 +34,12 @@ const setReportId = () => {
   sessionStorage.setItem("sdac-uploaded-report-id", REPORT_ID);
 };
 
+const setHostPageContext = (query = "") => {
+  const basePath = window.location.pathname || "/";
+  const url = query ? `${basePath}?${query}` : basePath;
+  window.history.replaceState({}, "", url);
+};
+
 const mockSession = () => {
   server.use(
     http.post("*/sdac/sessions", () =>
@@ -58,12 +64,15 @@ const mockSession = () => {
 describe("AssistantWidget flows", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    setHostPageContext();
     setReportId();
     mockSession();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    setHostPageContext();
+    server.events.removeAllListeners("request:end");
   });
 
   it("persists conversationId after first response", async () => {
@@ -151,7 +160,7 @@ describe("AssistantWidget flows", () => {
     expect(sessionStorage.getItem(`sdac-conversation-${REPORT_ID}`)).toBeNull();
   });
 
-  it("shows validation fallback banner on API error", async () => {
+  it("shows a validation error instead of mock data on API error", async () => {
     server.use(
       http.post("*/sdac/validate", () =>
         new HttpResponse(JSON.stringify({ error: "Validation failed" }), {
@@ -167,6 +176,102 @@ describe("AssistantWidget flows", () => {
     await userEvent.click(evaluateButton);
 
     await expect(screen.findByText(/Could not connect to validation service/i)).resolves.toBeDefined();
+    expect(screen.queryByText(/Showing cached\/mock data/i)).not.toBeInTheDocument();
+  });
+
+  it("blocks interaction when district context is missing and no report is loaded", async () => {
+    sessionStorage.clear();
+
+    let sessionCalls = 0;
+    let chatCalls = 0;
+    server.events.on("request:end", ({ request }) => {
+      if (request.url.endsWith("/sdac/sessions")) sessionCalls += 1;
+      if (request.url.endsWith("/sdac/chat")) chatCalls += 1;
+    });
+
+    render(<AssistantWidget />);
+
+    await expect(
+      screen.findByText(/This page did not provide district context/i)
+    ).resolves.toBeDefined();
+
+    const input = screen.getByPlaceholderText(/Resolve report context to continue/i);
+    expect(input).toBeDisabled();
+    expect(sessionCalls).toBe(0);
+    expect(chatCalls).toBe(0);
+  });
+
+  it("requires explicit confirmation before loading a fallback quarter", async () => {
+    sessionStorage.clear();
+    setHostPageContext("districtId=364&districtName=Elsberry%20R-II&quarter=Q2&year=2025");
+
+    let syncCalls = 0;
+
+    server.use(
+      http.post("*/sdac/sessions", () =>
+        HttpResponse.json({
+          session_id: "test-session-001",
+          district_id: "364",
+          expires_at: "2026-12-31T00:00:00.000Z",
+          is_new: true,
+          report_id: null,
+          user_id: "demo-user",
+          user_email: "demo@example.com",
+          user_name: "Demo User",
+          user_role: "District Admin",
+          district_name: "Elsberry R-II",
+          quarter: null,
+          year: null,
+          resolution_status: "fallback_available",
+          requested_quarter: "Q2",
+          requested_year: 2025,
+          fallback_candidate: {
+            quarter: "Q2",
+            year: 2024,
+            record_count: 12,
+          },
+        })
+      ),
+      http.post("*/sdac/sync", () => {
+        syncCalls += 1;
+        return HttpResponse.json({
+          report_id: "RPT-FALLBACK",
+          status: "success",
+          record_count: 12,
+          synced: true,
+          district_name: "Elsberry R-II",
+          quarter: "Q2",
+          year: 2024,
+          fallback: true,
+          requested_quarter: "Q2",
+          requested_year: 2025,
+          available_quarters: [
+            { quarter: "Q2", year: 2024, record_count: 12 },
+          ],
+          resolution_status: "exact_match",
+          fallback_candidate: {
+            quarter: "Q2",
+            year: 2024,
+            record_count: 12,
+          },
+        });
+      })
+    );
+
+    render(<AssistantWidget />);
+
+    await expect(screen.findByText(/Q2 2025 is not available/i)).resolves.toBeDefined();
+    const input = screen.getByPlaceholderText(/Resolve report context to continue/i);
+    expect(input).toBeDisabled();
+    expect(syncCalls).toBe(0);
+
+    const useFallbackButton = screen.getByRole("button", { name: /Use Q2 2024/i });
+    await userEvent.click(useFallbackButton);
+
+    await waitFor(() => expect(syncCalls).toBe(1));
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("Ask anything...")).toBeEnabled()
+    );
   });
 
   it("runs evaluate issues and shows overview", async () => {
