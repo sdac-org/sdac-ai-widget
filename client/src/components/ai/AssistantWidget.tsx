@@ -707,6 +707,13 @@ export function AssistantWidget({
   };
 
   const hostContext = getHostPageContext();
+  const hostPageContextKey = [
+    hostContext.districtId,
+    hostContext.userId,
+    hostContext.quarter,
+    hostContext.year,
+  ].join("::");
+  const previousHostPageContextKeyRef = useRef<string | null>(null);
 
   const { context: sessionContext, setConversationId, clearConversation } = useSessionContext({
     reportId: activeReportId,
@@ -737,6 +744,25 @@ export function AssistantWidget({
     userEmail: hostContext.userEmail,
     userRole: hostContext.userRole,
   });
+
+  useEffect(() => {
+    if (previousHostPageContextKeyRef.current === null) {
+      previousHostPageContextKeyRef.current = hostPageContextKey;
+      return;
+    }
+    if (previousHostPageContextKeyRef.current === hostPageContextKey) return;
+
+    previousHostPageContextKeyRef.current = hostPageContextKey;
+    clearConversation();
+    clearUploadedReportId();
+    setActiveReportId("");
+    setResolvedReportContext(null);
+    setContextResolutionError(null);
+    setValidationResult(null);
+    setValidationError(null);
+    setThreads([]);
+    setActiveThreadId(null);
+  }, [hostPageContextKey, clearConversation]);
 
   // Apply server-resolved report ID if user hasn't uploaded their own
   useEffect(() => {

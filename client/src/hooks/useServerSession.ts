@@ -4,8 +4,8 @@
  * Manages the server-side session lifecycle with the Ingestion Server.
  * Creates or resumes a session on mount, validates on visibility change.
  *
- * Sessions are district-scoped. The Ingestion Server returns an existing
- * active session for the same (districtId, userId) pair, or creates a new one.
+ * Sessions are page-context scoped on the client. Any district, user, quarter,
+ * or year change starts a fresh server bootstrap.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -72,11 +72,31 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
   const [fallbackCandidate, setFallbackCandidate] = useState<UseServerSessionReturn["fallbackCandidate"]>(null);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const initRef = useRef(false);
+  const initKeyRef = useRef<string | null>(null);
+  const contextKey = [
+    districtId,
+    userId ?? "",
+    userName ?? "",
+    userEmail ?? "",
+    userRole ?? "",
+    hostContext.quarter ?? "",
+    hostContext.year ?? "",
+  ].join("::");
 
   useEffect(() => {
-    if (!districtId || initRef.current) return;
-    initRef.current = true;
+    if (!districtId) return;
+    if (initKeyRef.current === contextKey) return;
+    initKeyRef.current = contextKey;
+
+    setServerSessionId(null);
+    setReportId(null);
+    setDistrictName(null);
+    setQuarter(null);
+    setYear(null);
+    setResolutionStatus(null);
+    setRequestedQuarter(null);
+    setRequestedYear(null);
+    setFallbackCandidate(null);
 
     const init = async () => {
       setIsInitializing(true);
@@ -128,7 +148,7 @@ export function useServerSession(options: UseServerSessionOptions): UseServerSes
     };
 
     init();
-  }, [districtId, userId, userName, userEmail, userRole, hostContext.quarter, hostContext.year]);
+  }, [contextKey, districtId, userId, userName, userEmail, userRole, hostContext.quarter, hostContext.year]);
 
   return {
     serverSessionId,

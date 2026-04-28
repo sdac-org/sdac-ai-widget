@@ -26,9 +26,12 @@ vi.mock("@/lib/session-manager", () => ({
 }));
 
 import { createSession } from "@/lib/session-api";
-import { saveServerSessionId } from "@/lib/session-manager";
+import { getHostPageContext } from "@/hooks/useHostPageContext";
+import { clearServerSessionId, saveServerSessionId } from "@/lib/session-manager";
 
 const mockedCreateSession = vi.mocked(createSession);
+const mockedGetHostPageContext = vi.mocked(getHostPageContext);
+const mockedClearServerSessionId = vi.mocked(clearServerSessionId);
 const mockedSaveServerSessionId = vi.mocked(saveServerSessionId);
 
 interface HookProbeProps {
@@ -77,6 +80,16 @@ describe("useServerSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    mockedGetHostPageContext.mockReturnValue({
+      districtId: "district-1",
+      districtName: "District One",
+      quarter: "Q2",
+      year: "2025",
+      userId: "user-1",
+      userName: "Test User",
+      userEmail: "test@example.com",
+      userRole: "admin",
+    });
   });
 
   it("returns reportId when session response includes report_id", async () => {
@@ -182,5 +195,52 @@ describe("useServerSession", () => {
         }),
       );
     });
+  });
+
+  it("reinitializes when the page context changes", async () => {
+    mockedCreateSession
+      .mockResolvedValueOnce({
+        ...SESSION_RESPONSE,
+        session_id: "s1",
+        report_id: "r1",
+      })
+      .mockResolvedValueOnce({
+        ...SESSION_RESPONSE,
+        session_id: "s2",
+        report_id: "r2",
+        district_id: "district-2",
+      });
+
+    const { rerender } = render(<HookProbe {...BASE_PROPS} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("report-id").textContent).toBe("r1");
+    });
+
+    mockedGetHostPageContext.mockReturnValue({
+      districtId: "district-2",
+      districtName: "District Two",
+      quarter: "Q3",
+      year: "2025",
+      userId: "user-1",
+      userName: "Test User",
+      userEmail: "test@example.com",
+      userRole: "admin",
+    });
+
+    rerender(<HookProbe {...BASE_PROPS} districtId="district-2" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("report-id").textContent).toBe("r2");
+    });
+    expect(mockedClearServerSessionId).toHaveBeenCalledTimes(2);
+    expect(mockedCreateSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        districtId: "district-2",
+        quarter: "Q3",
+        year: "2025",
+      }),
+    );
   });
 });
