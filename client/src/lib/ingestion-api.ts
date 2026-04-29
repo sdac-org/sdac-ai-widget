@@ -4,6 +4,7 @@
 // NOTE: Requests now go directly to the Ingestion Server (no Express proxy)
 
 import { getIngestionApiUrl } from "./api-config";
+import { withWidgetAuthHeaders } from "./widget-auth";
 
 export interface IngestionResponse {
   success: boolean;
@@ -50,6 +51,7 @@ export async function uploadIngestionFile(file: File): Promise<IngestionResponse
     console.log("[ingestion-api] Uploading file:", file.name, "Size:", file.size, "bytes");
     const response = await fetch(`${getIngestionApiUrl()}/ingestion`, {
       method: "POST",
+      headers: withWidgetAuthHeaders(),
       body: formData,
     });
 
@@ -88,6 +90,7 @@ export async function uploadSdacReport(params: SdacUploadParams): Promise<Ingest
 
     const response = await fetch(`${getIngestionApiUrl()}/sdac/upload`, {
       method: "POST",
+      headers: withWidgetAuthHeaders(),
       body: formData,
     });
 
@@ -128,7 +131,9 @@ export async function uploadSdacReport(params: SdacUploadParams): Promise<Ingest
  */
 export async function checkIngestionJobStatus(jobId: string) {
   console.log("[ingestion-api] Checking job status:", jobId);
-  const response = await fetch(`${getIngestionApiUrl()}/jobs/${jobId}`);
+  const response = await fetch(`${getIngestionApiUrl()}/jobs/${jobId}`, {
+    headers: withWidgetAuthHeaders(),
+  });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to check job status: ${response.status}`);
@@ -144,7 +149,9 @@ export async function checkIngestionJobStatus(jobId: string) {
  */
 export async function checkSdacReportStatus(reportId: string) {
   console.log("[ingestion-api] Checking SDAC report status:", reportId);
-  const response = await fetch(`${getIngestionApiUrl()}/sdac/reports/${reportId}`);
+  const response = await fetch(`${getIngestionApiUrl()}/sdac/reports/${reportId}`, {
+    headers: withWidgetAuthHeaders(),
+  });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to check report status: ${response.status}`);
@@ -160,7 +167,9 @@ export async function checkSdacReportStatus(reportId: string) {
  */
 export async function checkSdacReportAnalysisStatus(reportId: string) {
   console.log("[ingestion-api] Checking SDAC analysis status:", reportId);
-  const response = await fetch(`${getIngestionApiUrl()}/sdac/reports/${reportId}/analysis-status`);
+  const response = await fetch(`${getIngestionApiUrl()}/sdac/reports/${reportId}/analysis-status`, {
+    headers: withWidgetAuthHeaders(),
+  });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to check analysis status: ${response.status}`);

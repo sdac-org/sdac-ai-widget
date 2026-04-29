@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import { createIngestionProxy } from "./ingestion-proxy";
 import { buildBasePathRoute, getPublicBasePath } from "./base-path";
+import { requireWidgetAuth } from "./auth/widget-auth";
 
 /**
  * Widget Server Routes
@@ -32,7 +33,11 @@ export async function registerRoutes(
     app.get(buildBasePathRoute("/health", routePrefix), healthHandler);
     app.get(buildBasePathRoute("/api/health", routePrefix), healthHandler);
     app.get(buildBasePathRoute("/api/config", routePrefix), configHandler);
-    app.use(buildBasePathRoute("/api/ingestion", routePrefix), createIngestionProxy());
+    app.use(
+      buildBasePathRoute("/api/ingestion", routePrefix),
+      requireWidgetAuth,
+      createIngestionProxy(),
+    );
   }
 
   console.log(

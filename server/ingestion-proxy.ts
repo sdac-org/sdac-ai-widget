@@ -12,6 +12,7 @@
  */
 import { Router } from "express";
 import type { Request, Response } from "express";
+import { addIngestionServiceHeaders } from "./auth/ingestion-auth";
 
 /** Hop-by-hop headers that must not be forwarded between proxies. */
 const HOP_HEADERS = new Set([
@@ -33,14 +34,12 @@ function getUpstreamUrl(): string {
 }
 
 /** Forward relevant request headers to upstream. */
-function buildUpstreamHeaders(req: Request): Record<string, string> {
+async function buildUpstreamHeaders(req: Request): Promise<Record<string, string>> {
   const headers: Record<string, string> = {};
   if (req.headers["content-type"])
     headers["content-type"] = req.headers["content-type"];
-  if (req.headers["content-length"])
-    headers["content-length"] = req.headers["content-length"];
   if (req.headers["accept"]) headers["accept"] = req.headers["accept"];
-  return headers;
+  return addIngestionServiceHeaders(headers);
 }
 
 /** Copy upstream response headers to the client response, skipping hop-by-hop. */
@@ -89,6 +88,10 @@ function buildFetchBody(req: Request): {
     return { body: (req as any).rawBody as Buffer, duplex: undefined };
   }
 
+  if (req.is("application/json") && req.body !== undefined) {
+    return { body: Buffer.from(JSON.stringify(req.body)), duplex: undefined };
+  }
+
   // Multipart or other content-type -- body stream is unconsumed, pipe directly
   return { body: req as any, duplex: "half" };
 }
@@ -104,7 +107,7 @@ export function createIngestionProxy(): Router {
     try {
       const upstreamRes = await fetch(upstream, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: await addIngestionServiceHeaders({ "content-type": "application/json" }),
         body: JSON.stringify(req.body),
         signal: AbortSignal.timeout(5 * 60 * 1000), // 5 min chat timeout
       });
@@ -134,7 +137,7 @@ export function createIngestionProxy(): Router {
       const { body, duplex } = buildFetchBody(req);
       const fetchOpts: RequestInit & { duplex?: string } = {
         method: req.method,
-        headers: buildUpstreamHeaders(req),
+        headers: await buildUpstreamHeaders(req),
         signal: AbortSignal.timeout(60_000), // 60s default timeout
       };
       if (body !== undefined) {

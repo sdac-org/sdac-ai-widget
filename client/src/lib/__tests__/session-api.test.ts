@@ -141,6 +141,7 @@ describe("session-api", () => {
       expect(result).toBeNull();
       expect(mockFetch).toHaveBeenCalledWith(
         "https://api.test.com/sdac/sessions/expired-id",
+        { headers: expect.any(Object) },
       );
     });
 

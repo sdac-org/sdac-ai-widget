@@ -29,6 +29,7 @@ import { useSessionContext, saveUploadedReportId, getUploadedReportId, clearUplo
 import { getHostPageContext } from "@/hooks/useHostPageContext";
 import { useServerSession } from "@/hooks/useServerSession";
 import { getIngestionApiUrl } from "@/lib/api-config";
+import { withWidgetAuthHeaders } from "@/lib/widget-auth";
 import { syncDistrictReport } from "@/lib/session-api";
 import { SuggestedActions } from "./components/SuggestedActions";
 import { MessageRenderer } from "@/renderers";
@@ -861,7 +862,7 @@ export function AssistantWidget({
       // Fetch real validation data from Mastra
       const response = await fetch(`${getIngestionApiUrl()}/sdac/validate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withWidgetAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ reportId: sessionContext.reportId }),
       });
 
@@ -1010,7 +1011,7 @@ export function AssistantWidget({
     try {
       const response = await fetch(`${getIngestionApiUrl()}/sdac/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withWidgetAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(payload),
       });
 
@@ -1376,7 +1377,7 @@ export function AssistantWidget({
     try {
       const response = await fetch(`${getIngestionApiUrl()}/sdac/feedback`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: withWidgetAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           conversationSk: targetConversationSk,
           reportId: sessionContext.reportId,

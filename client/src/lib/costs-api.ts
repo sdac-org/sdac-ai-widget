@@ -6,6 +6,7 @@
  */
 
 import { getIngestionApiUrl } from "./api-config";
+import { withWidgetAuthHeaders } from "./widget-auth";
 
 export interface CostRecord {
   [key: string]: unknown;
@@ -29,7 +30,7 @@ export async function listCosts(params: {
   if (params.year) url.searchParams.set("year", String(params.year));
   if (params.quarter) url.searchParams.set("quarter", String(params.quarter));
 
-  const response = await fetch(url.toString());
+  const response = await fetch(url.toString(), { headers: withWidgetAuthHeaders() });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to fetch costs: ${response.status}`);
@@ -43,7 +44,7 @@ export async function listCosts(params: {
 export async function getCost(costId: string): Promise<CostRecord> {
   const url = `${getIngestionApiUrl()}/sdac/costs/${costId}`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: withWidgetAuthHeaders() });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || `Failed to fetch cost: ${response.status}`);

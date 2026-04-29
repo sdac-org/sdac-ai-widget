@@ -6,6 +6,7 @@
  */
 
 import { getIngestionApiUrl } from "./api-config";
+import { withWidgetAuthHeaders } from "./widget-auth";
 
 export interface SessionResponse {
   session_id: string;
@@ -71,7 +72,7 @@ export async function createSession(params: {
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withWidgetAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       district_id: params.districtId,
       user_id: params.userId || null,
@@ -97,7 +98,7 @@ export async function validateSession(sessionId: string): Promise<SessionRespons
   const url = `${getIngestionApiUrl()}/sdac/sessions/${sessionId}`;
   console.log("[session-api] Validating session:", sessionId);
 
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: withWidgetAuthHeaders() });
   if (response.status === 404) {
     console.log("[session-api] Session expired or not found");
     return null;
@@ -121,7 +122,7 @@ export async function syncDistrictReport(params: {
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: withWidgetAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       district_id: params.districtId,
       quarter: normalizedQuarter,

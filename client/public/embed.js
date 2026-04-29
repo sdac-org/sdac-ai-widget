@@ -63,7 +63,14 @@
 
   // Configuration -- read host page context from DOM
   // Prefer the consolidated data-sdac payload, then fall back to legacy data-sdac-* attributes.
-  var scriptOrigin = new URL(document.currentScript.src).origin;
+  var scriptUrl = new URL(document.currentScript.src);
+  var widgetToken = scriptUrl.searchParams.get('widget_token') ||
+    document.currentScript.getAttribute('data-widget-token') ||
+    document.currentScript.getAttribute('data-sdac-token') ||
+    '';
+  var scriptPath = scriptUrl.pathname;
+  var scriptBasePath = scriptPath.slice(0, scriptPath.lastIndexOf('/embed.js'));
+  var scriptOrigin = scriptUrl.origin + scriptBasePath;
   var contextEl = document.querySelector('[data-sdac-district-id]');
   var blobContext = readBlobContext();
   var legacyContext = readLegacyContext(contextEl);
@@ -71,6 +78,7 @@
 
   // Build iframe URL with host page context (query params BEFORE hash)
   var widgetUrl = new URL(scriptOrigin + '/');
+  if (widgetToken) widgetUrl.searchParams.set('widget_token', widgetToken);
   if (hostContext.districtId) widgetUrl.searchParams.set('districtId', hostContext.districtId);
   if (hostContext.userId) widgetUrl.searchParams.set('userId', hostContext.userId);
   if (hostContext.userName) widgetUrl.searchParams.set('userName', hostContext.userName);
