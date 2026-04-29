@@ -23,7 +23,19 @@ export function serveStatic(app: Express, options: { distPath?: string } = {}) {
   }
 
   const sendIndex = (_req: express.Request, res: express.Response) => {
-    res.sendFile(indexPath);
+    if (!basePath) {
+      res.sendFile(indexPath);
+      return;
+    }
+
+    fs.readFile(indexPath, "utf8", (err, html) => {
+      if (err) {
+        res.status(500).send("Widget app is not available");
+        return;
+      }
+
+      res.type("html").send(rewriteRootAssetUrls(html, basePath));
+    });
   };
 
   if (basePath) {
@@ -38,4 +50,16 @@ export function serveStatic(app: Express, options: { distPath?: string } = {}) {
 
   // fall through to index.html if the file doesn't exist
   app.use("/{*path}", requireWidgetAuth, sendIndex);
+}
+
+function rewriteRootAssetUrls(html: string, basePath: string): string {
+  const normalizedBasePath = basePath.replace(/\/+$/, "");
+  if (!normalizedBasePath) {
+    return html;
+  }
+
+  return html.replace(
+    /\b(src|href)=["']\/(assets\/|favicon\.[^"']*)/g,
+    (_match, attribute: string, assetPath: string) => `${attribute}="${normalizedBasePath}/${assetPath}`,
+  );
 }

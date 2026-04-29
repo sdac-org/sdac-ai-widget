@@ -46,7 +46,10 @@ function createApp() {
 
   const distPath = fs.mkdtempSync(path.join(os.tmpdir(), "sdac-widget-static-"));
   fs.writeFileSync(path.join(distPath, "embed.js"), "window.__embedLoaded = true;");
-  fs.writeFileSync(path.join(distPath, "index.html"), "<html><body>Widget app</body></html>");
+  fs.writeFileSync(
+    path.join(distPath, "index.html"),
+    '<html><head><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/app.css"><link rel="preconnect" href="https://fonts.googleapis.com"></head><body>Widget app<script type="module" src="/assets/app.js"></script></body></html>',
+  );
   fs.mkdirSync(path.join(distPath, "assets"));
   fs.writeFileSync(path.join(distPath, "assets", "app.js"), "window.__assetLoaded = true;");
 
@@ -84,6 +87,10 @@ describe("static widget auth", () => {
     expect(denied.status).toBe(401);
     expect(allowed.status).toBe(200);
     expect(allowed.text).toContain("Widget app");
+    expect(allowed.text).toContain('href="/widget/favicon.svg"');
+    expect(allowed.text).toContain('href="/widget/assets/app.css"');
+    expect(allowed.text).toContain('src="/widget/assets/app.js"');
+    expect(allowed.text).toContain('href="https://fonts.googleapis.com"');
     expect(asset.status).toBe(200);
     expect(asset.text).toContain("__assetLoaded");
   });
