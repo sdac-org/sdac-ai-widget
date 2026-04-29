@@ -17,6 +17,8 @@ import { addIngestionServiceHeaders } from "./auth/ingestion-auth";
 /** Hop-by-hop headers that must not be forwarded between proxies. */
 const HOP_HEADERS = new Set([
   "connection",
+  "content-encoding",
+  "content-length",
   "keep-alive",
   "transfer-encoding",
   "te",

@@ -3,6 +3,7 @@ import express from "express";
 import { createServer } from "http";
 import request from "supertest";
 import crypto from "crypto";
+import { gzipSync } from "zlib";
 import { registerRoutes } from "../routes";
 import { resetIngestionAuthCacheForTests } from "../auth/ingestion-auth";
 
@@ -204,6 +205,46 @@ describe("server routes", () => {
     expect(res.status).toBe(200);
     expect(res.body.authorization).toBe("Bearer upstream-token");
     expect(res.body.subscriptionKey).toBe("sub-key");
+  });
+
+  it("strips decoded upstream compression headers from proxied responses", async () => {
+    enableWidgetAuth();
+    const upstreamPayload = JSON.stringify({ session_id: "session-1", district_id: "364" });
+    const compressedPayload = gzipSync(Buffer.from(upstreamPayload));
+
+    const upstream = express();
+    upstream.post("/sdac/sessions", (_req, res) => {
+      res.status(200);
+      res.setHeader("content-type", "application/json");
+      res.setHeader("content-encoding", "gzip");
+      res.setHeader("content-length", String(compressedPayload.length));
+      res.end(compressedPayload);
+    });
+    const upstreamServer = upstream.listen(0);
+    const address = upstreamServer.address();
+    if (!address || typeof address === "string") {
+      upstreamServer.close();
+      throw new Error("Unable to start upstream test server");
+    }
+
+    process.env.INGESTION_API_URL = `http://127.0.0.1:${address.port}`;
+    const app = express();
+    app.use(express.json());
+    const server = createServer(app);
+    await registerRoutes(server, app);
+
+    const res = await request(app)
+      .post("/api/ingestion/sdac/sessions")
+      .set("Authorization", `Bearer ${signWidgetToken()}`)
+      .send({ district_id: "364" });
+
+    upstreamServer.close();
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-encoding"]).toBeUndefined();
+    expect(res.headers["content-length"]).toBeUndefined();
+    expect(res.body.session_id).toBe("session-1");
+    expect(res.body.district_id).toBe("364");
   });
 
   it("mirrors health and proxy routes under the configured base path", async () => {
